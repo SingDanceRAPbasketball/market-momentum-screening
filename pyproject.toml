@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "market-momentum-screening"
+version = "0.1.0"
+description = "Local A-share market trend, momentum and liquidity screening report"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "duckdb>=1.0,<2",
+  "Jinja2>=3.1,<4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
+[project.scripts]
+market-momentum = "market_momentum.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+market_momentum = ["templates/*.html.j2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

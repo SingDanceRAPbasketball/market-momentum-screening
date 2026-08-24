@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>行业强度作战矩阵 · {{ as_of }}</title>
+  <style>
+    :root {
+      color-scheme:light dark;
+      --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3546;
+      --txt:#dce3ec; --sub:#8b98a9; --up:#e5484d; --down:#2fbf71;
+      --acc:#f0b429; --blue:#4c8dff; --link:#9dc0ff;
+      --panel-bg:rgba(22,27,34,.96); --body-glow:#222f48; --shadow:rgba(0,0,0,.2);
+      --table-head:#1b2431; --row-line:#202836; --row-hover:#1a2230; --row-selected:#20304a;
+      --metric-bg:#131a24; --metric-line:#283344; --chart-grid:#263142; --chart-axis:#46556b;
+      --heat-bg:#111821; --heat-alt:#141b24; --heat-null:#27303b; --heat-selected:#24364f;
+      --bubble-label:#dce3ec; --bubble-stroke:#18212d; --selection-ring:#ffffff;
+      --warn-bg:#241d0d; --warn-border:#4a3a12; --warn-text:#d29922;
+      --tag-bg:#3a1d20; --tag-border:#6e2a2f; --weak-bg:#0f2e1e;
+    }
+    @media (prefers-color-scheme:light) {
+      :root {
+        --bg:#f4f6f8; --panel:#ffffff; --panel2:#f4f7fb; --line:#d7dee8;
+        --txt:#182230; --sub:#647184; --up:#d92d3a; --down:#168a50;
+        --acc:#9a6700; --blue:#2869d8; --link:#245fb8;
+        --panel-bg:rgba(255,255,255,.97); --body-glow:#dce9fb; --shadow:rgba(31,45,61,.10);
+        --table-head:#f0f4f8; --row-line:#e6ebf1; --row-hover:#f4f7fb; --row-selected:#e7f0ff;
+        --metric-bg:#f7f9fc; --metric-line:#dce3eb; --chart-grid:#e3e8ef; --chart-axis:#a8b3c2;
+        --heat-bg:#ffffff; --heat-alt:#f7f9fc; --heat-null:#dfe5ec; --heat-selected:#dbe9ff;
+        --bubble-label:#253246; --bubble-stroke:#c9d2de; --selection-ring:#182230;
+        --warn-bg:#fff8e6; --warn-border:#e8c66a; --warn-text:#7a5700;
+        --tag-bg:#fff0f1; --tag-border:#efb8bd; --weak-bg:#eaf8f0;
+      }
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; padding:16px; background:radial-gradient(circle at 15% -10%,var(--body-glow) 0,transparent 31%),var(--bg); color:var(--txt); font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; font-size:14px; }
+    a { color:var(--link); text-decoration:none; }
+    a:hover { color:var(--txt); }
+    .page { max-width:1680px; margin:auto; }
+    .panel,.kpi { background:var(--panel-bg); border:1px solid var(--line); border-radius:10px; box-shadow:0 14px 38px var(--shadow); }
+    .panel { padding:14px 16px; margin-bottom:14px; min-width:0; }
+    .head-line { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+    h1 { margin:0; font-size:22px; letter-spacing:.05em; }
+    h1 .tag { display:inline-block; margin-left:9px; padding:2px 8px; border:1px solid var(--tag-border); border-radius:4px; background:var(--tag-bg); color:var(--up); font-size:11px; vertical-align:3px; letter-spacing:0; }
+    .nav { display:flex; align-items:center; gap:12px; white-space:nowrap; font-size:13px; }
+    .meta { margin-top:7px; color:var(--sub); font-size:12px; line-height:1.75; }
+    .meta b { color:var(--txt); }
+    .disclaimer { display:inline-block; margin-top:7px; padding:6px 10px; border:1px solid var(--warn-border); border-radius:6px; background:var(--warn-bg); color:var(--warn-text); font-size:12px; }
+    .kpis { display:grid; grid-template-columns:repeat(6,minmax(130px,1fr)); gap:10px; margin-bottom:14px; }
+    .kpi { padding:12px 14px; }
+    .kpi .k { color:var(--sub); font-size:12px; }
+    .kpi .v { margin-top:4px; font-size:22px; font-weight:750; font-variant-numeric:tabular-nums; }
+    .kpi .v.name { font-size:17px; }
+    .kpi .s { margin-top:2px; color:var(--sub); font-size:11px; }
+    .layout { display:grid; grid-template-columns:minmax(0,1fr) 390px; gap:14px; align-items:start; }
+    .side { position:sticky; top:12px; }
+    h2 { margin:0 0 8px; font-size:15px; }
+    h2 small { margin-left:8px; color:var(--sub); font-size:12px; font-weight:400; }
+    .chart { width:100%; height:500px; }
+    svg { display:block; width:100%; height:100%; }
+    .axis { stroke:var(--chart-axis); stroke-width:1; }
+    .gridline { stroke:var(--chart-grid); stroke-width:1; }
+    .axis-label { fill:var(--sub); font-size:11px; }
+    .bubble-label { fill:var(--bubble-label); font-size:10px; pointer-events:none; }
+    .heat-wrap { max-height:660px; overflow:auto; border:1px solid var(--line); border-radius:7px; }
+    canvas { display:block; cursor:pointer; touch-action:manipulation; }
+    .toolbar { display:grid; grid-template-columns:minmax(220px,1fr) 180px; gap:10px; margin-bottom:10px; }
+    input,select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel2); color:var(--txt); outline:none; }
+    button { padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel2); color:var(--txt); cursor:pointer; }
+    button:disabled { cursor:not-allowed; opacity:.65; }
+    .refresh-button { border-color:color-mix(in srgb,var(--blue) 65%,transparent); background:color-mix(in srgb,var(--blue) 10%,transparent); color:var(--link); }
+    .refresh-button.running { border-color:color-mix(in srgb,var(--acc) 65%,transparent); color:var(--acc); }
+    .refresh-status { color:var(--sub); font-size:11px; }
+    .api-key-button { color:var(--link); }
+    dialog { width:min(440px,calc(100vw - 32px)); padding:0; border:1px solid var(--line); border-radius:12px; background:var(--panel); color:var(--txt); box-shadow:0 24px 70px rgba(0,0,0,.35); }
+    dialog::backdrop { background:rgba(5,10,18,.62); backdrop-filter:blur(3px); }
+    .auth-form { padding:18px; }
+    .auth-head { display:flex; align-items:start; justify-content:space-between; gap:16px; }
+    .auth-head h2 { margin:0; font-size:18px; }
+    .auth-copy { margin:8px 0 15px; color:var(--sub); font-size:12px; line-height:1.65; }
+    .auth-copy a { text-decoration:underline; text-underline-offset:2px; }
+    .auth-form label { display:grid; gap:6px; color:var(--sub); font-size:12px; }
+    .api-key-field { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .auth-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+    .auth-message { min-height:19px; margin-top:9px; color:var(--sub); font-size:12px; }
+    .auth-message.success { color:var(--down); }
+    .auth-message.error { color:var(--up); }
+    input:focus,select:focus { border-color:var(--blue); }
+    .table-wrap { max-height:570px; overflow:auto; }
+    table { width:100%; border-collapse:collapse; font-size:12.5px; }
+    th { position:sticky; top:0; z-index:2; padding:7px 8px; border-bottom:1px solid var(--line); background:var(--table-head); color:var(--sub); text-align:right; font-weight:500; cursor:pointer; white-space:nowrap; }
+    th:first-child,td:first-child { text-align:left; }
+    td { padding:7px 8px; border-bottom:1px solid var(--row-line); text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    tbody tr { cursor:pointer; }
+    tbody tr:hover td { background:var(--row-hover); }
+    tbody tr.sel td { background:var(--row-selected); }
+    .up { color:var(--up); } .down { color:var(--down); } .muted { color:var(--sub); }
+    .badge { display:inline-block; margin-left:5px; padding:1px 6px; border-radius:4px; font-size:10px; }
+    .strong { background:var(--tag-bg); color:var(--up); } .weak { background:var(--weak-bg); color:var(--down); }
+    .detail-title { font-size:22px; font-weight:750; }
+    .detail-code { margin-left:7px; color:var(--sub); font-size:12px; font-weight:400; }
+    .detail-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin:12px 0; }
+    .metric { padding:9px; border:1px solid var(--metric-line); border-radius:7px; background:var(--metric-bg); }
+    .metric span { display:block; color:var(--sub); font-size:11px; }
+    .metric b { display:block; margin-top:4px; font-size:16px; }
+    .bar { display:flex; height:18px; margin:8px 0 4px; overflow:hidden; border-radius:4px; background:var(--metric-line); }
+    .bar .u { background:var(--up); } .bar .d { background:var(--down); } .bar .f { background:#596575; }
+    .legend { display:flex; gap:12px; color:var(--sub); font-size:11px; }
+    .section-label { margin:14px 0 5px; color:var(--sub); font-size:12px; }
+    .stock { display:grid; grid-template-columns:minmax(0,1fr) 66px 82px; gap:7px; padding:6px; border-bottom:1px solid var(--row-line); font-size:12px; }
+    .stock .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .stock small { color:var(--sub); }
+    .note { margin-top:10px; padding-top:9px; border-top:1px dashed var(--line); color:var(--sub); font-size:11px; line-height:1.65; }
+    footer { padding:4px 2px 14px; color:var(--sub); font-size:11px; line-height:1.7; }
+    @media (max-width:1100px) { .kpis{grid-template-columns:repeat(3,1fr)} .layout{grid-template-columns:1fr} .side{position:static} }
+    @media (max-width:640px) { body{padding:10px} .kpis{grid-template-columns:repeat(2,1fr)} .toolbar{grid-template-columns:1fr} .head-line{display:block}.nav{margin-top:10px}.chart{height:420px} }
+  </style>
+</head>
+<body>
+<main class="page">
+  <section class="panel">
+    <div class="head-line">
+      <div><h1>行业强度作战矩阵 <span class="tag">REAL DATA · 同花顺金融 API</span></h1></div>
+      <nav class="nav"><a href="latest.html">全市场趋势</a><a href="industry.html">行业强度</a><button id="api-key-button" class="api-key-button" type="button">设置 API Key</button><button id="refresh-report" class="refresh-button" type="button">一键刷新</button><span id="refresh-status" class="refresh-status"></span></nav>
+    </div>
+    <div class="meta">数据时间：<b id="asOf"></b> ｜ 样本：<b id="sample"></b> ｜ 基准：<b>000300.SH 沪深300</b></div>
+    <div class="meta">口径：RSₙ = 行业指数 n 日涨跌幅 − 沪深300同期涨跌幅；脉冲 = 当日行业成交额 ÷ 前20日均额；宽度与成分股成交额来自本地全市场前复权库。</div>
+    <div class="disclaimer">仅作数据观察与视觉穿透，不构成投资建议；历史相对强度不代表未来表现。</div>
+  </section>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="layout">
+    <div>
+      <article class="panel">
+        <h2>作战矩阵 · 行业强度气泡<small>x：RS20 ｜ y：成交额脉冲 ｜ 大小：成分股成交额 ｜ 颜色：上涨家数占比</small></h2>
+        <div class="chart" id="bubble"></div>
+      </article>
+      <article class="panel">
+        <h2>近20日热力带 · 行业超额收益<small>每格为行业指数日收益减沪深300日收益，点击行查看详情</small></h2>
+        <div class="heat-wrap"><canvas id="heat"></canvas></div>
+      </article>
+      <article class="panel">
+        <h2>全行业强度表<small>点击表头排序，点击行业联动详情</small></h2>
+        <div class="toolbar">
+          <input id="search" type="search" placeholder="搜索行业名称或代码">
+          <select id="filter"><option value="all">全部行业</option><option value="rs">RS20 &gt; 0</option><option value="ma">站上 MA20</option><option value="breadth">上涨家数过半</option></select>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr>
+            <th data-k="name">行业</th><th data-k="rank_now">排名</th><th data-k="rank_chg">变化</th>
+            <th data-k="rs5">RS5</th><th data-k="rs20">RS20</th><th data-k="rs60">RS60</th>
+            <th data-k="idx_chg">今日%</th><th data-k="pulse">脉冲x</th><th data-k="up">涨</th><th data-k="down">跌</th>
+            <th data-k="ew_proxy">等权%</th><th data-k="turn_sum">成交额</th>
+          </tr></thead><tbody id="industryRows"></tbody></table>
+        </div>
+      </article>
+    </div>
+
+    <aside class="side">
+      <article class="panel">
+        <h2>行业详情</h2>
+        <select id="industrySelect"></select>
+        <div id="detail"></div>
+      </article>
+    </aside>
+  </section>
+  <footer id="footer"></footer>
+</main>
+
+<dialog id="api-key-dialog" aria-labelledby="api-key-title">
+  <form id="api-key-form" class="auth-form">
+    <div class="auth-head"><h2 id="api-key-title">同花顺金融 API Key</h2><button id="api-key-close" type="button" aria-label="关闭">关闭</button></div>
+    <p class="auth-copy">Key 只会提交给本机认证服务，并通过官方 CLI 保存到系统凭据库，不会写入 HTML、日志或项目文件。保存新 Key 会替换当前凭据。可前往 <a href="https://fuyao.aicubes.cn/admin" target="_blank" rel="noreferrer">扶摇管理后台</a> 获取。</p>
+    <label>API Key<input id="api-key-input" class="api-key-field" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 API Key" required></label>
+    <div id="api-key-message" class="auth-message" aria-live="polite"></div>
+    <div class="auth-actions"><button id="api-key-cancel" type="button">取消</button><button id="api-key-submit" type="submit">保存到系统凭据库</button></div>
+  </form>
+</dialog>
+
+<script id="industry-data" type="application/json">{{ report_json | safe }}</script>
+<script>
+  const DATA = JSON.parse(document.getElementById("industry-data").textContent);
+  const refreshButton=document.getElementById("refresh-report"),refreshStatus=document.getElementById("refresh-status");
+  const apiKeyButton=document.getElementById("api-key-button"),apiKeyDialog=document.getElementById("api-key-dialog"),apiKeyForm=document.getElementById("api-key-form"),apiKeyInput=document.getElementById("api-key-input"),apiKeyMessage=document.getElementById("api-key-message"),apiKeySubmit=document.getElementById("api-key-submit");
+  let refreshToken=null,refreshPollTimer=null;
+  const NS = "http://www.w3.org/2000/svg";
+  let selectedCode = DATA.industries[0].code;
+  let sortKey = "rs20", sortDirection = -1;
+  let heatState = null;
+  let resizeFrame = null;
+  const fmt = (v,d=2) => v === null ? "—" : Number(v).toFixed(d);
+  const signed = (v,d=2) => v === null ? "—" : `${v > 0 ? "+" : ""}${Number(v).toFixed(d)}`;
+  const cls = v => v > 1e-12 ? "up" : v < -1e-12 ? "down" : "muted";
+  const yi = v => v === null ? "—" : `${(v/1e8).toFixed(v >= 1e11 ? 0 : 1)}亿`;
+  const escapeHtml = text => String(text).replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
+  const svgNode = (name,attrs={}) => { const n=document.createElementNS(NS,name); Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,String(v))); return n; };
+  const themeColor = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function showRefreshStatus(status) {
+    const phase=status?.phase||"idle";
+    refreshButton.disabled=phase==="running";
+    refreshButton.classList.toggle("running",phase==="running");
+    refreshButton.textContent=phase==="running"?"刷新中…":"一键刷新";
+    refreshStatus.textContent=phase==="running"?"同步中，可能需要数分钟":phase==="error"?status.message:phase==="success"?"上次刷新完成":"";
+  }
+  async function pollRefreshStatus() {
+    clearTimeout(refreshPollTimer);
+    try {
+      const response=await fetch("/api/refresh/status",{cache:"no-store"}),result=await response.json();
+      showRefreshStatus(result.status);
+      if(result.status.phase==="running") refreshPollTimer=setTimeout(pollRefreshStatus,2000);
+      else if(result.status.phase==="success") {refreshStatus.textContent="刷新完成，正在重载";setTimeout(()=>location.reload(),900);}
+    } catch(error) {refreshButton.disabled=false;refreshButton.classList.remove("running");refreshButton.textContent="一键刷新";refreshStatus.textContent="无法读取刷新状态";}
+  }
+  async function startReportRefresh() {
+    if(!refreshToken)return;
+    refreshButton.disabled=true;refreshButton.classList.add("running");refreshButton.textContent="刷新中…";refreshStatus.textContent="正在启动";
+    try {
+      const response=await fetch("/api/refresh",{method:"POST",headers:{"X-Refresh-Token":refreshToken}}),result=await response.json();
+      if(!response.ok&&result.error!=="already_running")throw new Error(result.error||"refresh_failed");
+      showRefreshStatus(result.status);pollRefreshStatus();
+    } catch(error) {refreshButton.disabled=false;refreshButton.classList.remove("running");refreshButton.textContent="重试刷新";refreshStatus.textContent="启动失败，请确认本地服务仍在运行";}
+  }
+  async function initializeRefreshButton() {
+    try {
+      const response=await fetch("/api/health",{cache:"no-store"}),result=await response.json();
+      refreshToken=result.refresh_token;showRefreshStatus(result.status);
+      if(result.status.phase==="running")pollRefreshStatus();
+      refreshButton.addEventListener("click",startReportRefresh);
+    } catch(error) {refreshButton.disabled=true;refreshButton.title="请使用 market-momentum serve 启动本地报告服务";refreshStatus.textContent="静态模式不可刷新";}
+  }
+
+  function setApiKeyMessage(text,kind="") {apiKeyMessage.textContent=text;apiKeyMessage.className=`auth-message ${kind}`.trim();}
+  async function ensureLocalToken() {
+    if(refreshToken)return refreshToken;
+    const response=await fetch("/api/health",{cache:"no-store"}),result=await response.json();
+    if(!response.ok||!result.auth_available)throw new Error("auth_unavailable");
+    refreshToken=result.refresh_token;return refreshToken;
+  }
+  async function openApiKeyDialog() {
+    apiKeyInput.value="";setApiKeyMessage("正在检查认证状态…");apiKeyDialog.showModal();
+    try {
+      await ensureLocalToken();
+      const response=await fetch("/api/auth/status",{cache:"no-store"}),result=await response.json();
+      setApiKeyMessage(result.configured?"当前已配置 API Key，可在此替换。":"当前尚未配置 API Key。",result.configured?"success":"");
+    } catch(error) {setApiKeyMessage("本地认证服务不可用，请确认报告服务仍在运行。","error");}
+    apiKeyInput.focus();
+  }
+  async function submitApiKey(event) {
+    event.preventDefault();let apiKey=apiKeyInput.value.trim();
+    if(!apiKey){setApiKeyMessage("请输入 API Key。","error");return;}
+    apiKeyInput.value="";apiKeySubmit.disabled=true;setApiKeyMessage("正在验证并保存…");
+    try {
+      const token=await ensureLocalToken(),requestBody=JSON.stringify({api_key:apiKey});apiKey="";
+      const response=await fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json","X-Refresh-Token":token},body:requestBody}),result=await response.json();
+      if(!response.ok||!result.ok)throw new Error(result.error?.hint||"保存失败，请检查 API Key。");
+      setApiKeyMessage("API Key 已保存到系统凭据库。","success");
+    } catch(error) {setApiKeyMessage(error.message||"保存失败，请检查 API Key。","error");}
+    finally {apiKey="";apiKeySubmit.disabled=false;}
+  }
+  apiKeyButton.addEventListener("click",openApiKeyDialog);apiKeyForm.addEventListener("submit",submitApiKey);
+  ["api-key-close","api-key-cancel"].forEach(id=>document.getElementById(id).addEventListener("click",()=>apiKeyDialog.close()));
+  apiKeyDialog.addEventListener("close",()=>{apiKeyInput.value="";setApiKeyMessage("");});
+
+  function renderHeader() {
+    document.getElementById("asOf").textContent = `${DATA.as_of} 收盘`;
+    document.getElementById("sample").textContent = `${DATA.summary.industry_count} 个一级行业 · ${DATA.trade_dates} 个交易日`;
+    const w=DATA.width,s=DATA.summary;
+    const values=[
+      ["市场宽度 · 上涨家数", `${(w.up_ratio*100).toFixed(1)}%`, `涨 ${w.up} / 跌 ${w.down} / 平 ${w.flat}`],
+      ["RS20 > 0 行业数", s.rs20_positive, `共 ${s.industry_count} 个行业`],
+      ["站上 MA20 行业数", s.above_ma20, `共 ${s.industry_count} 个行业`],
+      ["最强行业 RS20", s.strongest.name, `${signed(s.strongest.value,2)}pp`,"name"],
+      ["成交额脉冲最高", s.pulse_high.name, `${fmt(s.pulse_high.value,2)}x`,"name"],
+      ["排名跃升最快", s.rank_gainer.name, `${signed(s.rank_gainer.value,0)}位`,"name"]
+    ];
+    document.getElementById("kpis").innerHTML=values.map(x=>`<div class="kpi"><div class="k">${escapeHtml(x[0])}</div><div class="v ${x[3]||""}">${escapeHtml(x[1])}</div><div class="s">${escapeHtml(x[2])}</div></div>`).join("");
+  }
+
+  function filteredRows() {
+    const query=document.getElementById("search").value.trim().toLowerCase();
+    const mode=document.getElementById("filter").value;
+    return DATA.industries.filter(row => {
+      if (query && !`${row.name} ${row.code}`.toLowerCase().includes(query)) return false;
+      if (mode === "rs" && row.rs20 <= 0) return false;
+      if (mode === "ma" && !row.above_ma20) return false;
+      if (mode === "breadth" && row.up <= row.down + row.flat) return false;
+      return true;
+    });
+  }
+
+  function renderBubble(rows) {
+    const target=document.getElementById("bubble"); target.textContent="";
+    if (!rows.length) { target.innerHTML='<div class="muted" style="padding:80px;text-align:center">无匹配行业</div>'; return; }
+    const svg=svgNode("svg",{viewBox:"0 0 900 500",preserveAspectRatio:"none"}); target.appendChild(svg);
+    const box={l:58,r:878,t:24,b:455};
+    const xVals=rows.map(r=>r.rs20), yVals=rows.map(r=>r.pulse), turn=rows.map(r=>Math.log10(Math.max(r.turn_sum,1)));
+    const extent=values=>{let a=Math.min(...values),b=Math.max(...values);if(a===b){a-=1;b+=1}const p=(b-a)*.08;return[a-p,b+p]};
+    const xd=extent(xVals),yd=extent(yVals),td=extent(turn);
+    const scale=(v,d,a,b)=>a+(v-d[0])*(b-a)/(d[1]-d[0]);
+    for(let i=0;i<=5;i++){
+      const x=box.l+(box.r-box.l)*i/5,y=box.t+(box.b-box.t)*i/5;
+      svg.appendChild(svgNode("line",{x1:x,y1:box.t,x2:x,y2:box.b,class:"gridline"}));
+      svg.appendChild(svgNode("line",{x1:box.l,y1:y,x2:box.r,y2:y,class:"gridline"}));
+      const tx=svgNode("text",{x,y:480,"text-anchor":"middle",class:"axis-label"});tx.textContent=`${fmt(xd[0]+(xd[1]-xd[0])*i/5,1)}pp`;svg.appendChild(tx);
+      const ty=svgNode("text",{x:49,y:y+4,"text-anchor":"end",class:"axis-label"});ty.textContent=`${fmt(yd[1]-(yd[1]-yd[0])*i/5,2)}x`;svg.appendChild(ty);
+    }
+    if(xd[0]<0&&xd[1]>0){const x=scale(0,xd,box.l,box.r);svg.appendChild(svgNode("line",{x1:x,y1:box.t,x2:x,y2:box.b,stroke:"#78879c","stroke-dasharray":"5 5"}));}
+    rows.forEach(row=>{
+      const ratio=row.cons_n ? row.up/row.cons_n : .5;
+      const red=Math.round(47+(229-47)*ratio),green=Math.round(191+(72-191)*ratio),blue=Math.round(113+(77-113)*ratio);
+      const group=svgNode("g",{tabindex:0,role:"button","data-code":row.code});
+      const circle=svgNode("circle",{cx:scale(row.rs20,xd,box.l,box.r),cy:scale(row.pulse,yd,box.b,box.t),r:scale(Math.log10(Math.max(row.turn_sum,1)),td,7,22),fill:`rgb(${red},${green},${blue})`,opacity:row.code===selectedCode ? .98 : .75,stroke:row.code===selectedCode ? themeColor("--selection-ring") : themeColor("--bubble-stroke"),"stroke-width":row.code===selectedCode ? 2 : 1});
+      const title=svgNode("title");title.textContent=`${row.name}\nRS20 ${signed(row.rs20)}pp · 脉冲 ${fmt(row.pulse)}x\n涨 ${row.up} / 跌 ${row.down} · ${yi(row.turn_sum)}`;circle.appendChild(title);
+      group.appendChild(circle); group.addEventListener("click",()=>selectIndustry(row.code)); svg.appendChild(group);
+      if(row.rank_now<=12){const label=svgNode("text",{x:scale(row.rs20,xd,box.l,box.r)+6,y:scale(row.pulse,yd,box.b,box.t)-8,class:"bubble-label"});label.textContent=row.name;svg.appendChild(label);}
+    });
+  }
+
+  function paintHeatRow(state,index) {
+    if(index<0||index>=state.rows.length)return;
+    const {ctx,rows,labelW,cellW,rowH,headH,cssW}=state,row=rows[index],y=headH+index*rowH;
+    ctx.fillStyle=row.code===selectedCode?themeColor("--heat-selected"):index%2?themeColor("--heat-alt"):themeColor("--heat-bg");
+    ctx.fillRect(0,y,cssW,rowH);
+    ctx.fillStyle=themeColor("--txt");ctx.fillText(`${row.rank_now}. ${row.name}`,6,y+rowH/2);
+    row.heat.forEach((value,c)=>{const x=labelW+c*cellW,a=Math.min(.9,.14+Math.abs(value||0)/3.2);ctx.fillStyle=value===null?themeColor("--heat-null"):value>=0?`rgba(229,72,77,${a})`:`rgba(47,191,113,${a})`;ctx.fillRect(x+1,y+1,cellW-2,rowH-2);});
+  }
+
+  function renderHeat(rows) {
+    const canvas=document.getElementById("heat"),wrap=canvas.parentElement;
+    const labelW=112,cellW=34,rowH=22,headH=34,cssW=Math.max(wrap.clientWidth-2,labelW+DATA.heat_dates.length*cellW),cssH=headH+rows.length*rowH;
+    const dpr=Math.min(window.devicePixelRatio||1,2);canvas.width=cssW*dpr;canvas.height=cssH*dpr;canvas.style.width=`${cssW}px`;canvas.style.height=`${cssH}px`;
+    const ctx=canvas.getContext("2d");ctx.scale(dpr,dpr);ctx.fillStyle=themeColor("--heat-bg");ctx.fillRect(0,0,cssW,cssH);ctx.font='11px "PingFang SC",sans-serif';ctx.textBaseline="middle";
+    DATA.heat_dates.forEach((d,i)=>{ctx.fillStyle=themeColor("--sub");ctx.save();ctx.translate(labelW+i*cellW+cellW/2,27);ctx.rotate(-.55);ctx.fillText(d.slice(5),-12,0);ctx.restore();});
+    heatState={ctx,rows,labelW,cellW,rowH,headH,cssW};
+    rows.forEach((_,index)=>paintHeatRow(heatState,index));
+    canvas.onclick=event=>{const started=performance.now(),rect=canvas.getBoundingClientRect(),y=event.clientY-rect.top,index=Math.floor((y-headH)/rowH);if(index>=0&&index<rows.length)selectIndustry(rows[index].code);canvas.dataset.lastInteractionMs=(performance.now()-started).toFixed(2);};
+    canvas.title="红色为正超额收益，绿色为负超额收益";
+  }
+
+  function updateSelection(previousCode) {
+    document.querySelectorAll("#industryRows tr").forEach(tr=>tr.classList.toggle("sel",tr.dataset.code===selectedCode));
+    document.querySelectorAll("#bubble g[data-code]").forEach(group=>{
+      const active=group.dataset.code===selectedCode,circle=group.querySelector("circle");
+      circle.setAttribute("opacity",active ? .98 : .75);circle.setAttribute("stroke",active?themeColor("--selection-ring"):themeColor("--bubble-stroke"));circle.setAttribute("stroke-width",active?2:1);
+    });
+    if(heatState){
+      const previousIndex=heatState.rows.findIndex(row=>row.code===previousCode),nextIndex=heatState.rows.findIndex(row=>row.code===selectedCode);
+      paintHeatRow(heatState,previousIndex);if(nextIndex!==previousIndex)paintHeatRow(heatState,nextIndex);
+    }
+  }
+
+  function renderTable(rows) {
+    const sorted=[...rows].sort((a,b)=>{const av=a[sortKey],bv=b[sortKey];if(typeof av==="string")return av.localeCompare(bv,"zh-CN")*sortDirection;return ((av??-Infinity)-(bv??-Infinity))*sortDirection;});
+    document.getElementById("industryRows").innerHTML=sorted.map(r=>`<tr data-code="${r.code}" class="${r.code===selectedCode?"sel":""}">
+      <td>${escapeHtml(r.name)}<span class="badge ${r.rs20>=0?"strong":"weak"}">${r.rs20>=0?"强":"弱"}</span></td><td>${r.rank_now}</td><td class="${cls(r.rank_chg)}">${signed(r.rank_chg,0)}</td>
+      <td class="${cls(r.rs5)}">${signed(r.rs5)}</td><td class="${cls(r.rs20)}">${signed(r.rs20)}</td><td class="${cls(r.rs60)}">${signed(r.rs60)}</td>
+      <td class="${cls(r.idx_chg)}">${signed(r.idx_chg)}</td><td>${fmt(r.pulse)}</td><td class="up">${r.up}</td><td class="down">${r.down}</td>
+      <td class="${cls(r.ew_proxy)}">${signed(r.ew_proxy)}</td><td>${yi(r.turn_sum)}</td></tr>`).join("");
+    document.querySelectorAll("#industryRows tr").forEach(tr=>tr.onclick=()=>selectIndustry(tr.dataset.code));
+  }
+
+  function renderDetail() {
+    const r=DATA.industries.find(x=>x.code===selectedCode)||DATA.industries[0];
+    const total=Math.max(1,r.up+r.down+r.flat),share=DATA.width.turnover?r.turn_sum/DATA.width.turnover*100:0;
+    document.getElementById("industrySelect").value=r.code;
+    document.getElementById("detail").innerHTML=`
+      <div style="margin-top:13px"><span class="detail-title">${escapeHtml(r.name)}</span><span class="detail-code">${r.code}</span></div>
+      <div class="detail-grid">
+        <div class="metric"><span>RS20 / 排名</span><b class="${cls(r.rs20)}">${signed(r.rs20)}pp · #${r.rank_now}</b></div>
+        <div class="metric"><span>排名变化</span><b class="${cls(r.rank_chg)}">${signed(r.rank_chg,0)} 位</b></div>
+        <div class="metric"><span>今日指数</span><b class="${cls(r.idx_chg)}">${signed(r.idx_chg)}%</b></div>
+        <div class="metric"><span>成交额脉冲</span><b>${fmt(r.pulse)}x</b></div>
+        <div class="metric"><span>RS5 / RS60</span><b>${signed(r.rs5)} / ${signed(r.rs60)}</b></div>
+        <div class="metric"><span>MA20 状态</span><b class="${r.above_ma20?"up":"down"}">${r.above_ma20?"站上":"跌破"}</b></div>
+      </div>
+      <div class="section-label">成分股宽度 · 有行情 ${r.cons_n} / 目录 ${r.catalog_cons_n}</div>
+      <div class="bar"><div class="u" style="width:${r.up/total*100}%"></div><div class="f" style="width:${r.flat/total*100}%"></div><div class="d" style="width:${r.down/total*100}%"></div></div>
+      <div class="legend"><span class="up">涨 ${r.up}</span><span>平 ${r.flat}</span><span class="down">跌 ${r.down}</span></div>
+      <div class="section-label">行业成交额 ${yi(r.turn_sum)} · 全市场占比 ${share.toFixed(2)}% · 等权代理 <span class="${cls(r.ew_proxy)}">${signed(r.ew_proxy)}%</span></div>
+      <div class="section-label">成交额前 8 成分股</div>
+      ${r.top_stocks.map(s=>`<div class="stock"><div class="name">${escapeHtml(s.name)} <small>${s.code}</small></div><div class="${cls(s.chg)}">${signed(s.chg)}%</div><div>${yi(s.turnover)}</div></div>`).join("")}
+      <div class="note">行业指数相对强度与个股等权涨跌是两种不同口径；详情用于验证指数方向是否得到成分股广度与成交活跃度支持。</div>`;
+  }
+
+  function selectIndustry(code) {
+    if(code===selectedCode)return;
+    const previousCode=selectedCode;selectedCode=code;renderDetail();updateSelection(previousCode);
+  }
+  function renderAll(includeDetail=true) {
+    const rows=filteredRows();renderBubble(rows);renderHeat(rows);renderTable(rows);if(includeDetail)renderDetail();
+  }
+
+  document.querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{const key=th.dataset.k;if(sortKey===key)sortDirection*=-1;else{sortKey=key;sortDirection=key==="name"?1:-1}renderTable(filteredRows());});
+  document.getElementById("search").addEventListener("input",()=>renderAll(false));
+  document.getElementById("filter").addEventListener("change",()=>renderAll(false));
+  const select=document.getElementById("industrySelect");select.innerHTML=DATA.industries.map(r=>`<option value="${r.code}">#${r.rank_now} ${escapeHtml(r.name)}</option>`).join("");select.onchange=()=>selectIndustry(select.value);
+  window.addEventListener("resize",()=>{cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>renderAll(false));});
+  const themeQuery=window.matchMedia("(prefers-color-scheme: light)");
+  themeQuery.addEventListener?.("change",()=>renderAll(false));
+  renderHeader();renderAll();initializeRefreshButton();
+  document.getElementById("footer").textContent=`生成时间 ${DATA.generated_at} ｜ 数据来源：同花顺金融 API 行业指数目录、历史、成分股 + 本地 marketdb 前复权行情。浏览器不接触 API Key。`;
+</script>
+</body>
+</html>

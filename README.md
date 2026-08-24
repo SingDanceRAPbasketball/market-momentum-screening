@@ -1,23 +1,131 @@
 # Market Momentum Screening
 
-全市场趋势、动能和流动性筛选报告项目。
-
-目标是使用扶摇金融数据 API 获取 A 股行情，在每日收盘后自动计算市场宽度、20 日动量、MA20/MA60 趋势状态和成交额分层，并生成可离线打开的交互式 HTML 报告。
-
-## 计划中的处理流程
-
-1. 通过交易日历判断是否需要执行。
-2. 下载全市场近期日 K 和复权事件。
-3. 在临时 DuckDB 中完成前复权和指标计算。
-4. 校验数据日期、完整性、重复键和统计口径。
-5. 使用 Jinja2 和 ECharts 生成单文件 HTML。
-6. 将滚动行情状态及报告发布到对象存储。
+全市场趋势、动量、流动性与行业强度筛选项目。仓库支持确定性模拟数据和同花顺金融 API 真实数据两条路径；真实路径使用官方 `hithink-finance` CLI、Market Dump、本地 DuckDB、证券目录与 90 个一级行业指数数据，输出可完全离线打开的交互式 HTML。
 
 详细设计和已确定的计算口径见 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)。
 
+## 本地快速开始
+
+要求 Python 3.9 或更高版本。
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/market-momentum build --as-of 2026-08-21
+```
+
+生成物：
+
+- `output/latest.html`：单文件离线交互报告，内含全部筛选明细；
+- `output/industry.html`：90 个一级行业的相对强度、热力带、成分股宽度和详情；
+- `output/run_manifest.json`：本次运行日期、数据源和校验结果；
+- `output/industry_manifest.json`：行业报告运行清单；
+- `runtime/market.duckdb`：本地 DuckDB 数据库。
+
+在 macOS 中以静态方式打开报告：
+
+```bash
+open output/latest.html
+```
+
+静态方式可查看和筛选，但浏览器不能直接运行本地刷新脚本。要启用页面右上角的“一键刷新”，启动仅绑定本机回环地址的报告服务：
+
+```bash
+.venv/bin/market-momentum serve
+```
+
+然后打开 [http://127.0.0.1:8765/latest.html](http://127.0.0.1:8765/latest.html)。可以通过“设置 API Key”将凭据安全提交给仅限本机的服务：Key 通过 stdin 传给官方 CLI，并保存到系统凭据库，不写入 HTML、项目文件或日志。随后“一键刷新”会同步数据、重建全市场与行业报告，完成后自动重载页面；运行日志保存在 `runtime/refresh.log`。
+
+也可以调整模拟市场规模和日期：
+
+```bash
+.venv/bin/market-momentum build \
+  --as-of 2026-08-21 \
+  --symbols 5000 \
+  --sessions 120 \
+  --seed 20260821
+```
+
+当 `--as-of` 是周末时，本地版本会自动回退到最近一个工作日。模拟日历暂未处理中国法定节假日，接入扶摇交易日历后替换。
+
+## 已实现
+
+- 确定性模拟 OHLC 与成交额数据；
+- DuckDB 本地存储及窗口指标计算；
+- 20 日涨幅、MA20、MA60、20 日均额；
+- 强趋势、修复、回调、弱趋势状态；
+- T1—T4 流动性分层；
+- 日期、唯一键、OHLC、成交额和最新日覆盖校验；
+- 市场 KPI、动量散点、涨幅直方图、市场宽度、趋势矩阵；
+- 股票名称、趋势、流动性、涨幅和最低成交额联动筛选；
+- 当前筛选下 20 日涨幅前 15 名。
+- 全量股票明细分页、排序与当前筛选结果 CSV 导出；
+- 流动性分层和趋势状态独立统计；
+- 官方 marketdb `v_daily_qfq` 前复权视图适配。
+- 官方证券目录名称补全，避免 Market Dump 维表名称为空时退化为代码；
+- 90 个 `881xxx.TI` 一级行业的 RS5 / RS20 / RS60、20 日热力带、成交额脉冲和排名变化；
+- 行业成分股涨跌家数、等权涨跌代理、成交额与活跃个股联动详情；
+- 主页面与行业页面双向导航。
+- 仅限 `127.0.0.1` 的一键刷新服务、并发保护、临时请求令牌和页面自动重载。
+- 页面内 API Key 注入入口，使用 stdin 调用官方 CLI 并保存到系统凭据库。
+
+本地报告图表层使用内嵌原生 SVG，不加载外部 CDN，因此断网也可打开。后续生产版可以替换为内嵌 ECharts，指标数据接口无需改变。
+
+## 使用真实全市场数据
+
+本项目不会用模拟数据冒充真实行情。先安装并认证官方 CLI：
+
+```bash
+npm install -g @hithink-tech/hithink-finance-cli
+hithink-finance auth login
+hithink-finance data init --format json
+```
+
+认证信息保存在系统凭据库，不写入仓库。首次初始化后，可使用一键脚本增量同步数据并重建两张报告：
+
+```bash
+./scripts/refresh_real_reports.zsh
+```
+
+也可以单独构建全市场页面：
+
+```bash
+.venv/bin/market-momentum build-marketdb \
+  --source-database "$HOME/Library/Application Support/hithink-finance/data/market.duckdb" \
+  --symbol-catalog runtime/hithink-symbols.json \
+  --sessions 120
+```
+
+源数据库必须包含官方 `v_daily_qfq` 和 `v_symbol` 视图。报告会明确显示“同花顺金融数据 marketdb / 前复权”。`--symbol-catalog` 接收官方 `symbol list --output` 的 JSON 信封，用于补齐真实股票名称。
+
+行业页使用官方 `index catalog/history/constituents` 命令落盘的数据，并与全市场运行库联算：
+
+```bash
+.venv/bin/market-momentum build-industry \
+  --catalog runtime/hithink-industries.json \
+  --history-dir runtime/industry-history \
+  --constituents-dir runtime/industry-constituents \
+  --database runtime/market.duckdb \
+  --output output/industry.html
+```
+
+## 测试
+
+```bash
+.venv/bin/pytest
+```
+
+测试覆盖四种趋势状态、四级流动性、20 日涨幅口径、停牌覆盖率、新股空收益、证券名称补全，以及全市场与行业报告端到端生成。
+
+## 下一阶段
+
+1. 将真实数据刷新接入定时任务；
+2. 增加行业成分变更历史与成分覆盖率告警；
+3. 增加报告版本归档和跨日期对比；
+4. 接入对象存储和云端幂等发布。
+
 ## 安全约定
 
-- API Key 通过环境变量或云端 Secrets 注入。
-- `.env`、DuckDB、Parquet、下载缓存和运行日志不得提交到 Git。
+- API Key 优先保存在官方 CLI 的系统凭据库，云端通过 Secrets 注入；
+- `.env`、DuckDB、Parquet、下载缓存、运行日志和生成报告不得提交到 Git；
 - 报告公开发布前需要确认行情数据的再分发授权。
-
