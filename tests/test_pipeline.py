@@ -38,6 +38,8 @@ def test_end_to_end_report_is_self_contained(tmp_path: Path):
     assert "/api/health" in html
     assert "/api/auth/login" in html
     assert "设置 API Key" in html
+    assert 'class="market-table market-table-all"' in html
+    assert '<th class="number">20日涨幅</th>' in html
     assert "prefers-color-scheme: light" in html
     assert 'class="head-line"' in html
     assert "application/json" in html

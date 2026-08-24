@@ -85,11 +85,14 @@
     .axis { stroke: var(--line); stroke-width: 1; }
     .grid-line { stroke:var(--grid-color); stroke-width:1; }
     .axis-label { fill: var(--muted); font-size: 11px; }
-    .table-wrap { overflow: auto; max-height: 460px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .table-wrap { overflow:auto; max-height:460px; overscroll-behavior:contain; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    .market-table { min-width:1040px; }
+    .market-table.market-table-all { min-width:1460px; }
     th { position:sticky; top:0; z-index:1; background:var(--table-head); color:var(--muted); text-align:left; }
     th,td { padding:9px 8px; border-bottom:1px solid var(--row-line); white-space:nowrap; }
-    td.number { text-align: right; font-variant-numeric: tabular-nums; }
+    th.number,td.number { text-align:right; font-variant-numeric:tabular-nums; }
+    th.categorical,td.categorical { text-align:center; }
     .positive { color: var(--red); }
     .negative { color: var(--green); }
     .badge { display:inline-flex; padding:3px 7px; border-radius:999px; background:var(--badge-bg); color:var(--badge-text); }
@@ -193,8 +196,8 @@
         <h2>当前筛选下 20 日涨幅前 15 名</h2>
         <p class="panel-note" id="table-note"></p>
         <div class="table-wrap">
-          <table>
-            <thead><tr><th>代码</th><th>名称</th><th>趋势</th><th>流动性</th><th>收盘价</th><th>MA20</th><th>MA60</th><th>今日涨幅</th><th>20日涨幅</th><th>20日均额</th></tr></thead>
+          <table class="market-table">
+            <thead><tr><th>代码</th><th>名称</th><th class="categorical">趋势</th><th class="categorical">流动性</th><th class="number">收盘价</th><th class="number">MA20</th><th class="number">MA60</th><th class="number">今日涨幅</th><th class="number">20日涨幅</th><th class="number">20日均额</th></tr></thead>
             <tbody id="leaders"></tbody>
           </table>
         </div>
@@ -215,8 +218,8 @@
           <button id="export-csv" type="button">导出当前筛选 CSV</button>
         </div>
         <div class="table-wrap">
-          <table>
-            <thead><tr><th>代码</th><th>名称</th><th>趋势</th><th>流动性</th><th>开盘</th><th>最高</th><th>最低</th><th>收盘</th><th>MA20</th><th>MA60</th><th>今日涨幅</th><th>20日涨幅</th><th>当日成交额</th><th>20日均额</th></tr></thead>
+          <table class="market-table market-table-all">
+            <thead><tr><th>代码</th><th>名称</th><th class="categorical">趋势</th><th class="categorical">流动性</th><th class="number">开盘</th><th class="number">最高</th><th class="number">最低</th><th class="number">收盘</th><th class="number">MA20</th><th class="number">MA60</th><th class="number">今日涨幅</th><th class="number">20日涨幅</th><th class="number">当日成交额</th><th class="number">20日均额</th></tr></thead>
             <tbody id="all-stocks"></tbody>
           </table>
         </div>
@@ -534,7 +537,7 @@
       const leaders = [...rows].sort((a, b) => b.return_20d - a.return_20d).slice(0, 15);
       document.getElementById("table-note").textContent = `共 ${rows.length} 只匹配，展示涨幅前 ${leaders.length} 名`;
       document.getElementById("leaders").innerHTML = leaders.map(row => `<tr>
-        <td>${row.thscode}</td><td>${row.name}</td><td><span class="badge">${row.trend}</span></td><td>${row.liquidity}</td>
+        <td>${row.thscode}</td><td>${row.name}</td><td class="categorical"><span class="badge">${row.trend}</span></td><td class="categorical">${row.liquidity}</td>
         <td class="number">${num(row.close)}</td><td class="number">${num(row.ma20)}</td><td class="number">${num(row.ma60)}</td>
         <td class="number ${row.return_1d === null ? "" : row.return_1d >= 0 ? "positive" : "negative"}">${pct(row.return_1d)}</td><td class="number ${row.return_20d === null ? "" : row.return_20d >= 0 ? "positive" : "negative"}">${pct(row.return_20d)}</td><td class="number">${num(row.amount_avg_20)}</td>
       </tr>`).join("");
@@ -561,7 +564,7 @@
       const start = (currentPage - 1) * pageSize;
       const pageRows = ordered.slice(start, start + pageSize);
       document.getElementById("all-stocks").innerHTML = pageRows.map(row => `<tr>
-        <td>${row.thscode}</td><td>${row.name}</td><td><span class="badge">${row.trend}</span></td><td>${row.liquidity}</td>
+        <td>${row.thscode}</td><td>${row.name}</td><td class="categorical"><span class="badge">${row.trend}</span></td><td class="categorical">${row.liquidity}</td>
         <td class="number">${num(row.open)}</td><td class="number">${num(row.high)}</td><td class="number">${num(row.low)}</td><td class="number">${num(row.close)}</td>
         <td class="number">${num(row.ma20)}</td><td class="number">${num(row.ma60)}</td><td class="number ${row.return_1d === null ? "" : row.return_1d >= 0 ? "positive" : "negative"}">${pct(row.return_1d)}</td><td class="number ${row.return_20d === null ? "" : row.return_20d >= 0 ? "positive" : "negative"}">${pct(row.return_20d)}</td>
         <td class="number">${num(row.amount_billion)}</td><td class="number">${num(row.amount_avg_20)}</td>
