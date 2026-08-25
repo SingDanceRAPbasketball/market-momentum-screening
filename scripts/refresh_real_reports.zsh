@@ -25,6 +25,11 @@ require_ok "$status_result"
 source_database=$(jq -r '.data.path' <<< "$status_result")
 
 mkdir -p runtime/industry-history runtime/industry-constituents output
+staging_dir=$(mktemp -d "${project_dir}/runtime/report-build.XXXXXX")
+cleanup_staging() {
+  rm -rf "$staging_dir"
+}
+trap cleanup_staging EXIT
 
 hithink-finance symbol list \
   --asset-type a-share \
@@ -54,7 +59,8 @@ PY
 )
 start_date=$(date -j -v-180d -f '%Y-%m-%d' "$latest_date" '+%Y-%m-%d')
 start_ms=$(date -j -f '%Y-%m-%d %H:%M:%S' "$start_date 00:00:00" '+%s000')
-end_ms=$(date -j -f '%Y-%m-%d %H:%M:%S' "$latest_date 23:59:59" '+%s000')
+today=$(date '+%Y-%m-%d')
+end_ms=$(date -j -f '%Y-%m-%d %H:%M:%S' "$today 23:59:59" '+%s000')
 
 fetch_history() {
   local code=$1
@@ -69,6 +75,38 @@ fetch_history() {
 }
 
 fetch_history '000300.SH'
+benchmark_date=$(.venv/bin/python - runtime/industry-history/000300_SH.json <<'PY'
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+items = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["data"]["item"]
+print(max(datetime.fromtimestamp(item["date_ms"] / 1000, ZoneInfo("Asia/Shanghai")).date() for item in items))
+PY
+)
+
+market_snapshot_args=()
+if [[ "$benchmark_date" > "$latest_date" ]]; then
+  current_hhmm=$(date '+%H%M')
+  if [[ "$benchmark_date" != "$today" || "$current_hhmm" -lt 1505 ]]; then
+    print -u2 "远端指数已到 ${benchmark_date}，但仅支持在当日 15:05 后用收盘快照补齐"
+    exit 1
+  fi
+  hithink-finance market snapshot \
+    --limit 10000 \
+    --offset 0 \
+    --output runtime/hithink-market-snapshot.json \
+    --format json >/dev/null
+  jq -e '.ok == true and (.data.item | length) >= 5000' runtime/hithink-market-snapshot.json >/dev/null
+  market_snapshot_args=(
+    --market-snapshot runtime/hithink-market-snapshot.json
+    --snapshot-date "$benchmark_date"
+  )
+  print "marketdb 截止 ${latest_date}，使用 ${benchmark_date} 全市场收盘快照补齐"
+fi
+
 count=0
 while IFS= read -r code; do
   fetch_history "$code"
@@ -87,8 +125,9 @@ done < <(jq -r '.data.item[] | select(.thscode | startswith("881")) | .thscode' 
 .venv/bin/market-momentum build-marketdb \
   --source-database "$source_database" \
   --symbol-catalog runtime/hithink-symbols.json \
+  "${market_snapshot_args[@]}" \
   --sessions 120 \
-  --output output/latest.html \
+  --output "$staging_dir/latest.html" \
   --database runtime/market.duckdb
 
 .venv/bin/market-momentum build-industry \
@@ -97,7 +136,10 @@ done < <(jq -r '.data.item[] | select(.thscode | startswith("881")) | .thscode' 
   --constituents-dir runtime/industry-constituents \
   --database runtime/market.duckdb \
   --benchmark 000300.SH \
-  --output output/industry.html
+  --output "$staging_dir/industry.html"
 
 .venv/bin/pytest -q
+.venv/bin/market-momentum publish \
+  --staging-dir "$staging_dir" \
+  --output-dir output
 print '真实数据报告刷新完成：output/latest.html 与 output/industry.html'

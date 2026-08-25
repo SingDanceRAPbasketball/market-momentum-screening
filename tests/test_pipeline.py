@@ -1,12 +1,14 @@
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import duckdb
 
 from market_momentum.demo import latest_weekday, trading_days
 from market_momentum.industry import build_industry_report
 from market_momentum.pipeline import build_local_report, build_marketdb_report
+from market_momentum.publishing import publish_report_bundle
 from market_momentum.validation import validate_prices
 
 
@@ -37,11 +39,16 @@ def test_end_to_end_report_is_self_contained(tmp_path: Path):
     assert "一键刷新" in html
     assert "/api/health" in html
     assert "/api/auth/login" in html
+    assert 'const REPORT_KEY = "latest"' in html
+    assert "loadLatestReport(result.status)" in html
     assert "设置 API Key" in html
     assert 'class="market-table market-table-all"' in html
     assert '<th class="number">20日涨幅</th>' in html
     assert "prefers-color-scheme: light" in html
     assert 'class="head-line"' in html
+    assert 'preserveAspectRatio: "xMidYMid meet"' in html
+    assert "const robustExtent = values" in html
+    assert "极端值贴边显示" in html
     assert "application/json" in html
     assert "NaN" not in html
     assert "undefined" not in html
@@ -119,6 +126,68 @@ def test_build_from_official_marketdb_views(tmp_path: Path):
     assert "前复权" in html
 
 
+def test_marketdb_build_appends_closed_market_snapshot(tmp_path: Path):
+    source = tmp_path / "source.duckdb"
+    connection = duckdb.connect(str(source))
+    connection.execute(
+        "CREATE TABLE v_daily_qfq (thscode VARCHAR, date DATE, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, amount DOUBLE)"
+    )
+    connection.execute("CREATE TABLE v_symbol (thscode VARCHAR, name VARCHAR)")
+    connection.execute("INSERT INTO v_symbol VALUES ('600000.SH', '测试股票')")
+    first = date(2026, 6, 1)
+    rows = []
+    for index in range(60):
+        close = 10 + index * .1
+        rows.append(("600000.SH", first + timedelta(days=index), close, close, close, close, 100_000_000))
+    connection.executemany("INSERT INTO v_daily_qfq VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+    connection.close()
+
+    snapshot_date = first + timedelta(days=60)
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "data": {
+                    "timestamp": int(
+                        datetime.combine(
+                            snapshot_date,
+                            datetime.min.time(),
+                            tzinfo=ZoneInfo("Asia/Shanghai"),
+                        ).timestamp()
+                        * 1000
+                    ),
+                    "item": [
+                        {
+                            "thscode": "600000.SH",
+                            "open_price": 15.9,
+                            "high_price": 16.2,
+                            "low_price": 15.8,
+                            "last_price": 16.0,
+                            "prev_price": 15.9,
+                            "turnover": 200_000_000,
+                        }
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = build_marketdb_report(
+        output_path=tmp_path / "output" / "latest.html",
+        database_path=tmp_path / "runtime" / "report.duckdb",
+        source_database=source,
+        market_snapshot=snapshot,
+        snapshot_date=snapshot_date,
+        sessions=60,
+    )
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert result.as_of == snapshot_date
+    assert manifest["snapshot_rows"] == 1
+    assert "marketdb + 收盘快照" in result.report_path.read_text(encoding="utf-8")
+
+
 def test_latest_coverage_allows_a_small_suspended_population():
     connection = duckdb.connect(":memory:")
     connection.execute(
@@ -194,7 +263,11 @@ def test_build_industry_report_from_official_cli_envelopes(tmp_path: Path):
         return [
             {
                 "date_ms": int(
-                    datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc).timestamp()
+                    datetime.combine(
+                        day,
+                        datetime.min.time(),
+                        tzinfo=ZoneInfo("Asia/Shanghai"),
+                    ).timestamp()
                     * 1000
                 ),
                 "close_price": 100 + index * multiplier,
@@ -234,5 +307,44 @@ def test_build_industry_report_from_official_cli_envelopes(tmp_path: Path):
     assert "/api/refresh" in html
     assert "/api/auth/login" in html
     assert "设置 API Key" in html
+    assert 'const REPORT_KEY="industry"' in html
+    assert "loadLatestReport(result.status)" in html
     assert "prefers-color-scheme:light" in html
     assert "updateSelection(previousCode)" in html
+    assert '"heat_dates":["2026-08-02"' in html
+    assert '"2026-08-21"]' in html
+
+
+def test_publish_report_bundle_replaces_current_reports_and_removes_old_html(tmp_path: Path):
+    staging = tmp_path / "staging"
+    output = tmp_path / "output"
+    staging.mkdir()
+    output.mkdir()
+    (output / "latest.html").write_text("old market", encoding="utf-8")
+    (output / "industry.html").write_text("old industry", encoding="utf-8")
+    (output / "market-2026-08-21.html").write_text("obsolete", encoding="utf-8")
+    generated_at = "2026-08-25T14:00:00+08:00"
+    (staging / "latest.html").write_text("market 2026-08-24", encoding="utf-8")
+    (staging / "industry.html").write_text("industry 2026-08-24", encoding="utf-8")
+    for name in ("run_manifest.json", "industry_manifest.json"):
+        (staging / name).write_text(
+            json.dumps(
+                {
+                    "status": "success",
+                    "as_of": "2026-08-24",
+                    "generated_at": generated_at,
+                    "report": "staging/report.html",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = publish_report_bundle(staging, output)
+
+    assert result.as_of == "2026-08-24"
+    assert (output / "latest.html").read_text(encoding="utf-8") == "market 2026-08-24"
+    assert (output / "industry.html").read_text(encoding="utf-8") == "industry 2026-08-24"
+    assert not (output / "market-2026-08-21.html").exists()
+    assert json.loads((output / "run_manifest.json").read_text())["report"] == str(
+        output.resolve() / "latest.html"
+    )

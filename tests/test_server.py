@@ -19,6 +19,16 @@ def test_local_refresh_server_requires_token_and_reports_completion(tmp_path: Pa
     output = tmp_path / "output"
     output.mkdir()
     (output / "latest.html").write_text("<h1>test</h1>", encoding="utf-8")
+    (output / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "success",
+                "as_of": "2026-08-24",
+                "generated_at": "2026-08-25T14:00:00+08:00",
+            }
+        ),
+        encoding="utf-8",
+    )
     controller = RefreshController(tmp_path, command=["/usr/bin/true"])
     auth = AuthController(
         login_command=[
@@ -44,6 +54,11 @@ def test_local_refresh_server_requires_token_and_reports_completion(tmp_path: Pa
         assert health["ok"]
         assert health["refresh_available"]
         assert health["auth_available"]
+        assert health["status"]["reports"]["latest"]["as_of"] == "2026-08-24"
+        assert health["status"]["reports"]["latest"]["version"]
+
+        with urlopen(f"{base_url}/latest.html?version=test", timeout=3) as response:
+            assert response.headers["Cache-Control"] == "no-store"
 
         auth_status = read_json(f"{base_url}/api/auth/status")
         assert auth_status["configured"]

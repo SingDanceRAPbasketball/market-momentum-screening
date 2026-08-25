@@ -169,7 +169,7 @@
       </article>
       <article class="panel span-4">
         <h2>20 日涨幅分布</h2>
-        <p class="panel-note">当前筛选结果，按等宽区间统计</p>
+        <p class="panel-note" id="histogram-note">当前筛选结果，按等宽区间统计</p>
         <div class="chart" id="histogram"></div>
       </article>
       <article class="panel span-7">
@@ -257,6 +257,7 @@
     const apiKeySubmit = document.getElementById("api-key-submit");
     let refreshToken = null;
     let refreshPollTimer = null;
+    const REPORT_KEY = "latest";
     const NS = "http://www.w3.org/2000/svg";
     const colors = {"强趋势":"#ff7285","修复":"#f7bd58","回调":"#5b8cff","弱趋势":"#4fd19b","na":"#90a5ba"};
     const pct = value => value === null ? "—" : `${(value * 100).toFixed(1)}%`;
@@ -278,15 +279,29 @@
     };
     const chartBase = target => {
       target.textContent = "";
-      const svg = svgNode("svg", {viewBox: "0 0 720 320", preserveAspectRatio: "none"});
+      const width = Math.max(360, Math.round(target.getBoundingClientRect().width || 720));
+      const height = Math.max(260, Math.round(target.getBoundingClientRect().height || 320));
+      const svg = svgNode("svg", {viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "xMidYMid meet"});
       target.appendChild(svg);
-      return svg;
+      return {svg, width, height};
     };
     const extent = values => {
       let low = Math.min(...values), high = Math.max(...values);
       if (low === high) { low -= 1; high += 1; }
       return [low, high];
     };
+    const quantile = (sorted, position) => {
+      if (!sorted.length) return null;
+      const index = (sorted.length - 1) * position;
+      const lower = Math.floor(index), upper = Math.ceil(index);
+      return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+    };
+    const robustExtent = values => {
+      if (values.length < 20) return extent(values);
+      const sorted = [...values].sort((left, right) => left - right);
+      return extent([quantile(sorted, .01), quantile(sorted, .99)]);
+    };
+    const clamp = (value, domain) => Math.max(domain[0], Math.min(domain[1], value));
     const scale = (value, domain, range) => range[0] + (value - domain[0]) * (range[1] - range[0]) / (domain[1] - domain[0]);
 
     function showRefreshStatus(status) {
@@ -297,23 +312,31 @@
       refreshStatus.textContent = phase === "running" ? "同步行情与行业数据，可能需要数分钟" : phase === "error" ? status.message : phase === "success" ? "上次刷新完成" : "";
     }
 
+    function loadLatestReport(status) {
+      const report = status?.reports?.[REPORT_KEY];
+      if (!report?.generated_at || report.generated_at === DATA.generated_at) return false;
+      refreshStatus.textContent = "检测到新报告，正在切换";
+      const target = new URL(report.url || "/latest.html", window.location.href);
+      target.searchParams.set("version", report.version || report.generated_at);
+      window.location.replace(target.href);
+      return true;
+    }
+
     async function pollRefreshStatus() {
       clearTimeout(refreshPollTimer);
       try {
         const response = await fetch("/api/refresh/status", {cache:"no-store"});
         const result = await response.json();
         showRefreshStatus(result.status);
-        if (result.status.phase === "running") {
-          refreshPollTimer = setTimeout(pollRefreshStatus, 2000);
-        } else if (result.status.phase === "success") {
-          refreshStatus.textContent = "刷新完成，正在重载";
-          setTimeout(() => location.reload(), 900);
-        }
+        if (loadLatestReport(result.status)) return;
+        const delay = result.status.phase === "running" ? 2000 : 5000;
+        refreshPollTimer = setTimeout(pollRefreshStatus, delay);
       } catch (error) {
         refreshButton.disabled = false;
         refreshButton.classList.remove("running");
         refreshButton.textContent = "一键刷新";
         refreshStatus.textContent = "无法读取刷新状态";
+        refreshPollTimer = setTimeout(pollRefreshStatus, 5000);
       }
     }
 
@@ -343,7 +366,8 @@
         const result = await response.json();
         refreshToken = result.refresh_token;
         showRefreshStatus(result.status);
-        if (result.status.phase === "running") pollRefreshStatus();
+        if (loadLatestReport(result.status)) return;
+        refreshPollTimer = setTimeout(pollRefreshStatus, result.status.phase === "running" ? 1000 : 5000);
         refreshButton.addEventListener("click", startReportRefresh);
       } catch (error) {
         refreshButton.disabled = true;
@@ -436,24 +460,24 @@
       const points = rows.filter(row => row.return_20d !== null && row.amount_avg_20 > 0);
       const step = Math.max(1, Math.ceil(points.length / 1500));
       const plotted = points.filter((row, index) => index % step === 0);
-      document.getElementById("scatter-note").textContent = `${points.length} 只股票参与统计 · 绘制 ${plotted.length} 个点 · 横轴 20 日涨幅 · 纵轴 20 日均额（对数）`;
+      document.getElementById("scatter-note").textContent = `${points.length} 只股票参与统计 · 绘制 ${plotted.length} 个点 · 横轴 20 日涨幅 · 纵轴 20 日均额（对数） · 坐标按 1%—99% 分位收敛，极端值贴边显示`;
       if (!points.length) { target.innerHTML = '<div class="empty">无匹配数据</div>'; return; }
-      const svg = chartBase(target), box = {left: 54, right: 700, top: 18, bottom: 282};
-      const xDomain = extent(points.map(row => row.return_20d * 100));
-      const yDomain = extent(points.map(row => Math.log10(row.amount_avg_20)));
+      const {svg, width, height} = chartBase(target), box = {left: 54, right: width - 18, top: 18, bottom: height - 38};
+      const xDomain = robustExtent(points.map(row => row.return_20d * 100));
+      const yDomain = robustExtent(points.map(row => Math.log10(row.amount_avg_20)));
       for (let index = 0; index <= 4; index += 1) {
         const x = box.left + (box.right - box.left) * index / 4;
         const y = box.top + (box.bottom - box.top) * index / 4;
         svg.appendChild(svgNode("line", {x1:x, y1:box.top, x2:x, y2:box.bottom, class:"grid-line"}));
         svg.appendChild(svgNode("line", {x1:box.left, y1:y, x2:box.right, y2:y, class:"grid-line"}));
-        svg.appendChild(textNode(x, 304, `${(xDomain[0] + (xDomain[1] - xDomain[0]) * index / 4).toFixed(0)}%`, "middle"));
+        svg.appendChild(textNode(x, height - 16, `${(xDomain[0] + (xDomain[1] - xDomain[0]) * index / 4).toFixed(0)}%`, "middle"));
         const amount = Math.pow(10, yDomain[1] - (yDomain[1] - yDomain[0]) * index / 4);
-        svg.appendChild(textNode(48, y + 4, amount.toFixed(amount < 10 ? 1 : 0), "end"));
+        svg.appendChild(textNode(48, y + 4, amount.toFixed(amount < 1 ? 2 : amount < 10 ? 1 : 0), "end"));
       }
       plotted.forEach(row => {
         const circle = svgNode("circle", {
-          cx: scale(row.return_20d * 100, xDomain, [box.left, box.right]),
-          cy: scale(Math.log10(row.amount_avg_20), yDomain, [box.bottom, box.top]),
+          cx: scale(clamp(row.return_20d * 100, xDomain), xDomain, [box.left, box.right]),
+          cy: scale(clamp(Math.log10(row.amount_avg_20), yDomain), yDomain, [box.bottom, box.top]),
           r: 4.2, fill: colors[row.trend], opacity: .72
         });
         const title = svgNode("title");
@@ -466,28 +490,29 @@
       const target = document.getElementById("histogram");
       const values = rows.map(row => row.return_20d).filter(value => value !== null).map(value => value * 100);
       if (!values.length) { target.innerHTML = '<div class="empty">无匹配数据</div>'; return; }
-      const svg = chartBase(target), domain = extent(values), bins = 14;
+      const {svg, width, height} = chartBase(target), domain = robustExtent(values), bins = 14;
+      document.getElementById("histogram-note").textContent = "当前筛选结果 · 1%—99% 分位内按等宽区间统计，极端值计入首尾区间";
       const counts = Array.from({length: bins}, () => 0);
       values.forEach(value => {
-        const index = Math.min(bins - 1, Math.floor((value - domain[0]) / (domain[1] - domain[0]) * bins));
+        const index = Math.max(0, Math.min(bins - 1, Math.floor((value - domain[0]) / (domain[1] - domain[0]) * bins)));
         counts[index] += 1;
       });
-      const maxCount = Math.max(...counts), left = 38, right = 704, top = 18, bottom = 282;
+      const maxCount = Math.max(...counts), left = 38, right = width - 16, top = 18, bottom = height - 38;
       counts.forEach((count, index) => {
         const slot = (right - left) / bins, height = (bottom - top) * count / maxCount;
         const midpoint = domain[0] + (domain[1] - domain[0]) * (index + .5) / bins;
         svg.appendChild(svgNode("rect", {x:left + slot * index + 1, y:bottom - height, width:Math.max(1, slot - 2), height, rx:2, fill:midpoint >= 0 ? "#ff7285" : "#4fd19b", opacity:.75}));
       });
       svg.appendChild(svgNode("line", {x1:left, y1:bottom, x2:right, y2:bottom, class:"axis"}));
-      svg.appendChild(textNode(left, 304, `${domain[0].toFixed(0)}%`));
-      svg.appendChild(textNode(right, 304, `${domain[1].toFixed(0)}%`, "end"));
+      svg.appendChild(textNode(left, height - 16, `${domain[0].toFixed(0)}%`));
+      svg.appendChild(textNode(right, height - 16, `${domain[1].toFixed(0)}%`, "end"));
       svg.appendChild(textNode(left, 14, `${maxCount}只`));
     }
 
     function drawWidth() {
       const target = document.getElementById("width-chart"), points = DATA.market_width.slice(-70);
       if (!points.length) { target.innerHTML = '<div class="empty">数据不足</div>'; return; }
-      const svg = chartBase(target), box = {left: 46, right: 704, top: 18, bottom: 282};
+      const {svg, width, height} = chartBase(target), box = {left: 46, right: width - 16, top: 18, bottom: height - 38};
       [0, .25, .5, .75, 1].forEach(value => {
         const y = scale(value, [0, 1], [box.bottom, box.top]);
         svg.appendChild(svgNode("line", {x1:box.left, y1:y, x2:box.right, y2:y, class:"grid-line"}));
@@ -501,8 +526,8 @@
         }).join(" ");
         svg.appendChild(svgNode("path", {d:path, fill:"none", stroke:series[1], "stroke-width":2.2}));
       });
-      svg.appendChild(textNode(box.left, 304, points[0].trade_date));
-      svg.appendChild(textNode(box.right, 304, points[points.length - 1].trade_date, "end"));
+      svg.appendChild(textNode(box.left, height - 16, points[0].trade_date));
+      svg.appendChild(textNode(box.right, height - 16, points[points.length - 1].trade_date, "end"));
       svg.appendChild(textNode(box.right - 96, 16, "MA20", "end")).setAttribute("fill", "#35d3cf");
       svg.appendChild(textNode(box.right, 16, "MA60", "end")).setAttribute("fill", "#5b8cff");
     }
@@ -632,6 +657,14 @@
     document.getElementById("previous-page").addEventListener("click", () => { currentPage -= 1; renderAllRows(currentRows()); });
     document.getElementById("next-page").addEventListener("click", () => { currentPage += 1; renderAllRows(currentRows()); });
     document.getElementById("export-csv").addEventListener("click", exportCurrentCsv);
+    let chartResizeTimer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(chartResizeTimer);
+      chartResizeTimer = setTimeout(() => {
+        const rows = currentRows();
+        drawScatter(rows); drawHistogram(rows); drawWidth();
+      }, 120);
+    });
     drawWidth(); refresh(); initializeRefreshButton();
   </script>
 </body>

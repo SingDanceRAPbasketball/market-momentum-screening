@@ -9,6 +9,7 @@ from typing import Optional, Sequence
 
 from .industry import build_industry_report
 from .pipeline import build_local_report, build_marketdb_report
+from .publishing import publish_report_bundle
 from .server import serve_reports
 
 
@@ -43,6 +44,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="官方 symbol list 命令输出的 JSON，用于补齐证券名称",
     )
+    marketdb.add_argument(
+        "--market-snapshot",
+        type=Path,
+        help="官方 market snapshot 输出的 JSON，用于在 marketdb 发布滞后时衔接最新收盘日",
+    )
+    marketdb.add_argument(
+        "--snapshot-date",
+        type=parse_date,
+        help="收盘快照对应交易日（YYYY-MM-DD，需与 --market-snapshot 同时提供）",
+    )
     marketdb.add_argument("--sessions", type=int, default=120)
     marketdb.add_argument("--output", type=Path, default=Path("output/latest.html"))
     marketdb.add_argument("--database", type=Path, default=Path("runtime/report.duckdb"))
@@ -57,6 +68,13 @@ def build_parser() -> argparse.ArgumentParser:
     industry.add_argument("--database", type=Path, required=True)
     industry.add_argument("--benchmark", default="000300.SH")
     industry.add_argument("--output", type=Path, default=Path("output/industry.html"))
+
+    publish = subparsers.add_parser(
+        "publish",
+        help="原子发布一组已生成的报告并清理旧 HTML",
+    )
+    publish.add_argument("--staging-dir", type=Path, required=True)
+    publish.add_argument("--output-dir", type=Path, default=Path("output"))
 
     serve = subparsers.add_parser(
         "serve",
@@ -95,6 +113,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             database_path=args.database,
             source_database=args.source_database,
             symbol_catalog=args.symbol_catalog,
+            market_snapshot=args.market_snapshot,
+            snapshot_date=args.snapshot_date,
             sessions=args.sessions,
         )
         print(f"报告已生成: {result.report_path.resolve()}")
@@ -113,6 +133,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"行业报告已生成: {result.report_path.resolve()}")
         print(f"数据日期: {result.as_of.isoformat()} | 行业数: {result.industries}")
         print(f"运行清单: {result.manifest_path.resolve()}")
+        return 0
+    if args.command == "publish":
+        result = publish_report_bundle(
+            staging_dir=args.staging_dir,
+            output_dir=args.output_dir,
+        )
+        print(f"最新报告已发布: {result.output_dir}")
+        print(f"数据日期: {result.as_of} | 已清理旧 HTML: {len(result.removed_html)}")
         return 0
     if args.command == "serve":
         serve_reports(

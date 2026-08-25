@@ -36,6 +36,8 @@ open output/latest.html
 
 然后打开 [http://127.0.0.1:8765/latest.html](http://127.0.0.1:8765/latest.html)。可以通过“设置 API Key”将凭据安全提交给仅限本机的服务：Key 通过 stdin 传给官方 CLI，并保存到系统凭据库，不写入 HTML、项目文件或日志。随后“一键刷新”会同步数据、重建全市场与行业报告，完成后自动重载页面；运行日志保存在 `runtime/refresh.log`。
 
+刷新采用临时目录构建和原子发布：两张报告全部生成且测试通过后才会替换 `output/latest.html` 与 `output/industry.html`，同时删除 `output/` 下其他旧 HTML。通过本地服务打开的页面会持续检测报告版本；即使刷新由另一个标签页触发，也会自动切换到带版本标识的最新 HTML。直接以 `file://` 打开的静态页面无法接收刷新通知。
+
 也可以调整模拟市场规模和日期：
 
 ```bash
@@ -86,6 +88,8 @@ hithink-finance data init --format json
 ```bash
 ./scripts/refresh_real_reports.zsh
 ```
+
+若收盘后官方 marketdb 同步包仍滞后，脚本会先用沪深300日线确认最新交易日，再以全市场收盘快照衔接前复权历史。快照覆盖率或两张报告日期校验不通过时不会覆盖当前页面。
 
 也可以单独构建全市场页面：
 

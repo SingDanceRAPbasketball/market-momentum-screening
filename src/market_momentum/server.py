@@ -12,6 +12,7 @@ from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
+from urllib.parse import urlsplit
 
 
 class RefreshController:
@@ -32,7 +33,36 @@ class RefreshController:
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
-            return dict(self._state)
+            state = dict(self._state)
+        state["reports"] = self._report_snapshot()
+        return state
+
+    def _report_snapshot(self) -> Dict[str, Dict[str, Any]]:
+        output_dir = self.project_dir / "output"
+        reports: Dict[str, Dict[str, Any]] = {}
+        definitions = {
+            "latest": ("latest.html", "run_manifest.json"),
+            "industry": ("industry.html", "industry_manifest.json"),
+        }
+        for key, (report_name, manifest_name) in definitions.items():
+            report_path = output_dir / report_name
+            if not report_path.is_file():
+                continue
+            manifest: Dict[str, Any] = {}
+            try:
+                loaded = json.loads((output_dir / manifest_name).read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    manifest = loaded
+            except (OSError, json.JSONDecodeError):
+                pass
+            stat = report_path.stat()
+            reports[key] = {
+                "url": f"/{report_name}",
+                "as_of": manifest.get("as_of"),
+                "generated_at": manifest.get("generated_at"),
+                "version": f"{stat.st_mtime_ns:x}-{stat.st_size:x}",
+            }
+        return reports
 
     def start(self) -> Tuple[bool, Dict[str, Any]]:
         with self._lock:
@@ -295,7 +325,8 @@ def make_handler(
             )
 
         def end_headers(self) -> None:
-            if self.path.endswith(".html") or self.path == "/":
+            request_path = urlsplit(self.path).path
+            if request_path.endswith(".html") or request_path == "/":
                 self.send_header("Cache-Control", "no-store")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "no-referrer")

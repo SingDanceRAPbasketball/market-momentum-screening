@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .database import (
+    append_market_snapshot,
     apply_symbol_catalog,
     calculate_indicators,
     connect,
@@ -80,7 +81,7 @@ def build_local_report(
         "status": "success",
         "source": "deterministic-demo",
         "as_of": target_date.isoformat(),
-        "generated_at": datetime.now().astimezone().isoformat(),
+        "generated_at": payload["generated_at"],
         "symbols": len(snapshot),
         "sessions": sessions,
         "report": str(output_path),
@@ -106,13 +107,22 @@ def build_marketdb_report(
     database_path: Path,
     source_database: Path,
     symbol_catalog: Optional[Path] = None,
+    market_snapshot: Optional[Path] = None,
+    snapshot_date: Optional[date] = None,
     sessions: int = 120,
 ) -> BuildResult:
+    if (market_snapshot is None) != (snapshot_date is None):
+        raise ValueError("market_snapshot and snapshot_date must be provided together")
     connection = connect(database_path)
     try:
         load_marketdb_prices(connection, source_database=source_database, sessions=sessions)
         named_symbols = (
             apply_symbol_catalog(connection, symbol_catalog) if symbol_catalog is not None else 0
+        )
+        snapshot_rows = (
+            append_market_snapshot(connection, market_snapshot, snapshot_date)
+            if market_snapshot is not None and snapshot_date is not None
+            else 0
         )
         target_date = max_trade_date(connection)
         checks = validate_prices(connection, target_date)
@@ -127,8 +137,16 @@ def build_marketdb_report(
         width,
         checks,
         metadata={
-            "source": "同花顺金融数据 marketdb",
-            "price_basis": "前复权",
+            "source": (
+                "同花顺金融数据 marketdb + 收盘快照"
+                if market_snapshot is not None
+                else "同花顺金融数据 marketdb"
+            ),
+            "price_basis": (
+                "前复权（最新收盘快照按昨收比例衔接）"
+                if market_snapshot is not None
+                else "前复权"
+            ),
             "sessions": sessions,
             "is_demo": False,
             "named_symbols": named_symbols,
@@ -144,9 +162,11 @@ def build_marketdb_report(
         "source": "marketdb-v_daily_qfq",
         "source_database": str(source_database),
         "symbol_catalog": str(symbol_catalog) if symbol_catalog is not None else None,
+        "market_snapshot": str(market_snapshot) if market_snapshot is not None else None,
+        "snapshot_rows": snapshot_rows,
         "named_symbols": named_symbols,
         "as_of": target_date.isoformat(),
-        "generated_at": datetime.now().astimezone().isoformat(),
+        "generated_at": payload["generated_at"],
         "symbols": len(snapshot),
         "sessions": sessions,
         "report": str(output_path),

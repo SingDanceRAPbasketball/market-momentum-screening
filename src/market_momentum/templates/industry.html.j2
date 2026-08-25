@@ -184,6 +184,7 @@
   const refreshButton=document.getElementById("refresh-report"),refreshStatus=document.getElementById("refresh-status");
   const apiKeyButton=document.getElementById("api-key-button"),apiKeyDialog=document.getElementById("api-key-dialog"),apiKeyForm=document.getElementById("api-key-form"),apiKeyInput=document.getElementById("api-key-input"),apiKeyMessage=document.getElementById("api-key-message"),apiKeySubmit=document.getElementById("api-key-submit");
   let refreshToken=null,refreshPollTimer=null;
+  const REPORT_KEY="industry";
   const NS = "http://www.w3.org/2000/svg";
   let selectedCode = DATA.industries[0].code;
   let sortKey = "rs20", sortDirection = -1;
@@ -204,14 +205,22 @@
     refreshButton.textContent=phase==="running"?"刷新中…":"一键刷新";
     refreshStatus.textContent=phase==="running"?"同步中，可能需要数分钟":phase==="error"?status.message:phase==="success"?"上次刷新完成":"";
   }
+  function loadLatestReport(status) {
+    const report=status?.reports?.[REPORT_KEY];
+    if(!report?.generated_at||report.generated_at===DATA.generated_at)return false;
+    refreshStatus.textContent="检测到新报告，正在切换";
+    const target=new URL(report.url||"/industry.html",window.location.href);
+    target.searchParams.set("version",report.version||report.generated_at);
+    window.location.replace(target.href);return true;
+  }
   async function pollRefreshStatus() {
     clearTimeout(refreshPollTimer);
     try {
       const response=await fetch("/api/refresh/status",{cache:"no-store"}),result=await response.json();
       showRefreshStatus(result.status);
-      if(result.status.phase==="running") refreshPollTimer=setTimeout(pollRefreshStatus,2000);
-      else if(result.status.phase==="success") {refreshStatus.textContent="刷新完成，正在重载";setTimeout(()=>location.reload(),900);}
-    } catch(error) {refreshButton.disabled=false;refreshButton.classList.remove("running");refreshButton.textContent="一键刷新";refreshStatus.textContent="无法读取刷新状态";}
+      if(loadLatestReport(result.status))return;
+      refreshPollTimer=setTimeout(pollRefreshStatus,result.status.phase==="running"?2000:5000);
+    } catch(error) {refreshButton.disabled=false;refreshButton.classList.remove("running");refreshButton.textContent="一键刷新";refreshStatus.textContent="无法读取刷新状态";refreshPollTimer=setTimeout(pollRefreshStatus,5000);}
   }
   async function startReportRefresh() {
     if(!refreshToken)return;
@@ -226,7 +235,8 @@
     try {
       const response=await fetch("/api/health",{cache:"no-store"}),result=await response.json();
       refreshToken=result.refresh_token;showRefreshStatus(result.status);
-      if(result.status.phase==="running")pollRefreshStatus();
+      if(loadLatestReport(result.status))return;
+      refreshPollTimer=setTimeout(pollRefreshStatus,result.status.phase==="running"?1000:5000);
       refreshButton.addEventListener("click",startReportRefresh);
     } catch(error) {refreshButton.disabled=true;refreshButton.title="请使用 market-momentum serve 启动本地报告服务";refreshStatus.textContent="静态模式不可刷新";}
   }

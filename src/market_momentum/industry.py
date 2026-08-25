@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 from statistics import mean
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+from zoneinfo import ZoneInfo
 
 import duckdb
 from jinja2 import Environment, PackageLoader, select_autoescape
+
+
+MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,11 @@ def _read_items(path: Path) -> List[Dict[str, Any]]:
 
 def _history_path(history_dir: Path, thscode: str) -> Path:
     return history_dir / f"{thscode.replace('.', '_')}.json"
+
+
+def _trade_date_from_ms(date_ms: int) -> date:
+    """Convert a HiThink daily-bar timestamp to its China-market trade date."""
+    return datetime.fromtimestamp(date_ms / 1000, tz=MARKET_TIMEZONE).date()
 
 
 def _return(values: Sequence[float], sessions: int, end: Optional[int] = None) -> Optional[float]:
@@ -140,11 +149,11 @@ def build_industry_payload(
         for item in benchmark_items
         if item.get("date_ms") is not None and item.get("close_price") is not None
     }
-    latest_ms = int(
-        datetime.combine(latest_date, datetime.min.time(), tzinfo=timezone.utc).timestamp()
-        * 1000
+    benchmark_dates = sorted(
+        date_ms
+        for date_ms in benchmark_by_date
+        if _trade_date_from_ms(date_ms) <= latest_date
     )
-    benchmark_dates = sorted(date_ms for date_ms in benchmark_by_date if date_ms <= latest_ms)
     if len(benchmark_dates) < 81:
         raise ValueError("benchmark history must contain at least 81 aligned sessions")
 
@@ -156,7 +165,8 @@ def build_industry_payload(
         history_by_date = {
             int(item["date_ms"]): item
             for item in history_items
-            if item.get("date_ms") is not None and int(item["date_ms"]) <= latest_ms
+            if item.get("date_ms") is not None
+            and _trade_date_from_ms(int(item["date_ms"])) <= latest_date
         }
         aligned_dates = [date_ms for date_ms in benchmark_dates if date_ms in history_by_date]
         industry_close = [float(history_by_date[date_ms]["close_price"]) for date_ms in aligned_dates]
@@ -239,7 +249,7 @@ def build_industry_payload(
         "benchmark": benchmark_code,
         "trade_dates": len(benchmark_dates[-90:]),
         "heat_dates": [
-            datetime.fromtimestamp(value / 1000, tz=timezone.utc).date().isoformat()
+            _trade_date_from_ms(value).isoformat()
             for value in common_heat_dates
         ],
         "width": width,

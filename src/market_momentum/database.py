@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Dict, Iterable, List
+from zoneinfo import ZoneInfo
 
 import duckdb
 
 from .demo import PriceRow
+
+
+MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 def connect(database_path: Path) -> duckdb.DuckDBPyConnection:
@@ -133,6 +137,117 @@ def apply_symbol_catalog(
     )
     return connection.execute(
         "SELECT COUNT(DISTINCT thscode) FROM raw_prices WHERE name <> thscode"
+    ).fetchone()[0]
+
+
+def append_market_snapshot(
+    connection: duckdb.DuckDBPyConnection,
+    snapshot_path: Path,
+    snapshot_date: date,
+) -> int:
+    """Append a closed-market snapshot while preserving the existing QFQ price scale."""
+    if not snapshot_path.exists():
+        raise FileNotFoundError(f"market snapshot does not exist: {snapshot_path}")
+    envelope = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    if not envelope.get("ok"):
+        raise ValueError("market snapshot response envelope is not successful")
+    data = envelope.get("data")
+    items = data.get("item") if isinstance(data, dict) else None
+    timestamp_ms = data.get("timestamp") if isinstance(data, dict) else None
+    if not isinstance(items, list) or timestamp_ms is None:
+        raise ValueError("market snapshot must contain data.item and data.timestamp")
+    response_date = datetime.fromtimestamp(
+        int(timestamp_ms) / 1000,
+        tz=MARKET_TIMEZONE,
+    ).date()
+    if response_date != snapshot_date:
+        raise ValueError(
+            f"market snapshot date mismatch: response={response_date}, expected={snapshot_date}"
+        )
+
+    existing_date = max_trade_date(connection)
+    if snapshot_date <= existing_date:
+        if snapshot_date == existing_date:
+            return connection.execute(
+                "SELECT COUNT(DISTINCT thscode) FROM raw_prices WHERE trade_date = ?",
+                [snapshot_date],
+            ).fetchone()[0]
+        raise ValueError(
+            f"market snapshot is older than local prices: {snapshot_date} < {existing_date}"
+        )
+
+    rows = [
+        (
+            item.get("thscode"),
+            item.get("open_price"),
+            item.get("high_price"),
+            item.get("low_price"),
+            item.get("last_price"),
+            item.get("prev_price"),
+            item.get("turnover"),
+        )
+        for item in items
+        if isinstance(item, dict)
+        and item.get("thscode")
+        and all(
+            item.get(field) is not None
+            for field in (
+                "open_price",
+                "high_price",
+                "low_price",
+                "last_price",
+                "prev_price",
+                "turnover",
+            )
+        )
+    ]
+    if not rows:
+        raise ValueError("market snapshot contains no complete OHLC rows")
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE market_snapshot (
+            thscode VARCHAR PRIMARY KEY,
+            open_price DOUBLE,
+            high_price DOUBLE,
+            low_price DOUBLE,
+            last_price DOUBLE,
+            prev_price DOUBLE,
+            turnover DOUBLE
+        )
+        """
+    )
+    connection.executemany("INSERT OR REPLACE INTO market_snapshot VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+    connection.execute(
+        """
+        INSERT INTO raw_prices
+        WITH previous AS (
+            SELECT thscode, name, close
+            FROM raw_prices
+            WHERE trade_date = ?
+        )
+        SELECT
+            snapshot.thscode,
+            previous.name,
+            ?::DATE AS trade_date,
+            snapshot.open_price * previous.close / snapshot.prev_price,
+            snapshot.high_price * previous.close / snapshot.prev_price,
+            snapshot.low_price * previous.close / snapshot.prev_price,
+            snapshot.last_price * previous.close / snapshot.prev_price,
+            snapshot.turnover / 100000000.0
+        FROM market_snapshot AS snapshot
+        INNER JOIN previous USING (thscode)
+        WHERE snapshot.prev_price > 0
+          AND snapshot.open_price > 0
+          AND snapshot.high_price > 0
+          AND snapshot.low_price > 0
+          AND snapshot.last_price > 0
+          AND snapshot.turnover >= 0
+        """,
+        [existing_date, snapshot_date],
+    )
+    return connection.execute(
+        "SELECT COUNT(DISTINCT thscode) FROM raw_prices WHERE trade_date = ?",
+        [snapshot_date],
     ).fetchone()[0]
 
 
