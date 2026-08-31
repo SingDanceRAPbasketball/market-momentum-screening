@@ -34,7 +34,15 @@ open output/latest.html
 .venv/bin/market-momentum serve
 ```
 
-然后打开 [http://127.0.0.1:8765/latest.html](http://127.0.0.1:8765/latest.html)。可以通过“设置 API Key”将凭据安全提交给仅限本机的服务：Key 通过 stdin 传给官方 CLI，并保存到系统凭据库，不写入 HTML、项目文件或日志。随后“一键刷新”会同步数据、重建全市场与行业报告，完成后自动重载页面；运行日志保存在 `runtime/refresh.log`。
+然后打开 [http://127.0.0.1:8765/latest.html](http://127.0.0.1:8765/latest.html)。可以通过“设置 API Key”将凭据安全提交给仅限本机的服务：Key 通过 stdin 传给官方 CLI，并保存到系统凭据库，不写入 HTML、项目文件或日志。随后“一键刷新”会同步数据、重建全市场与行业报告，完成后自动重载页面；“重启服务”会完整重启当前本地服务并在恢复后自动重载页面。运行日志保存在 `runtime/refresh.log`。未安装下述守护服务时，服务完全停止后浏览器无法自行启动本机进程。
+
+如需彻底免除终端常驻，可安装登录自动启动且异常退出自动恢复的 macOS 守护服务：
+
+```bash
+.venv/bin/market-momentum service install
+```
+
+安装后可用 `market-momentum service status` 检查状态，或用 `market-momentum service uninstall` 停止并移除。守护服务日志保存在 `runtime/server.stdout.log` 与 `runtime/server.stderr.log`。
 
 刷新采用临时目录构建和原子发布：两张报告全部生成且测试通过后才会替换 `output/latest.html` 与 `output/industry.html`，同时删除 `output/` 下其他旧 HTML。通过本地服务打开的页面会持续检测报告版本；即使刷新由另一个标签页触发，也会自动切换到带版本标识的最新 HTML。直接以 `file://` 打开的静态页面无法接收刷新通知。
 
@@ -68,7 +76,7 @@ open output/latest.html
 - 90 个 `881xxx.TI` 一级行业的 RS5 / RS20 / RS60、20 日热力带、成交额脉冲和排名变化；
 - 行业成分股涨跌家数、等权涨跌代理、成交额与活跃个股联动详情；
 - 主页面与行业页面双向导航。
-- 仅限 `127.0.0.1` 的一键刷新服务、并发保护、临时请求令牌和页面自动重载。
+- 仅限 `127.0.0.1` 的一键刷新与手动重启服务、并发保护、临时请求令牌和页面自动重载。
 - 页面内 API Key 注入入口，使用 stdin 调用官方 CLI 并保存到系统凭据库。
 
 本地报告图表层使用内嵌原生 SVG，不加载外部 CDN，因此断网也可打开。后续生产版可以替换为内嵌 ECharts，指标数据接口无需改变。

@@ -11,6 +11,7 @@ from .industry import build_industry_report
 from .pipeline import build_local_report, build_marketdb_report
 from .publishing import publish_report_bundle
 from .server import serve_reports
+from .service_manager import install_service, service_status, uninstall_service
 
 
 def parse_date(value: str) -> date:
@@ -83,6 +84,18 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--project-dir", type=Path, default=Path.cwd())
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
+
+    service = subparsers.add_parser(
+        "service",
+        help="安装、检查或卸载无需终端常驻的 macOS 本地服务",
+    )
+    service_commands = service.add_subparsers(dest="service_command", required=True)
+    service_install = service_commands.add_parser("install", help="安装并启动 LaunchAgent")
+    service_install.add_argument("--project-dir", type=Path, default=Path.cwd())
+    service_install.add_argument("--host", default="127.0.0.1")
+    service_install.add_argument("--port", type=int, default=8765)
+    service_commands.add_parser("status", help="检查 LaunchAgent 状态")
+    service_commands.add_parser("uninstall", help="停止并移除 LaunchAgent")
     return parser
 
 
@@ -149,6 +162,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             port=args.port,
         )
         return 0
+    if args.command == "service":
+        if args.service_command == "install":
+            plist_path = install_service(
+                project_dir=args.project_dir,
+                host=args.host,
+                port=args.port,
+            )
+            print(f"本地守护服务已安装: {plist_path}")
+            print(f"服务地址: http://{args.host}:{args.port}/latest.html")
+            return 0
+        if args.service_command == "status":
+            status = service_status()
+            print(f"LaunchAgent: {status['label']}")
+            print(f"状态: {'运行中' if status['loaded'] else '未安装或未运行'}")
+            print(f"配置: {status['plist']}")
+            return 0 if status["loaded"] else 1
+        if args.service_command == "uninstall":
+            plist_path = uninstall_service()
+            print(f"本地守护服务已移除: {plist_path}")
+            return 0
     return 2
 
 

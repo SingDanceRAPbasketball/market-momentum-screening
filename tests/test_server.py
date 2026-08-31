@@ -42,9 +42,10 @@ def test_local_refresh_server_requires_token_and_reports_completion(tmp_path: Pa
             "import json; print(json.dumps({'ok': True, 'data': {'configured': True, 'source': 'keyring'}}))",
         ],
     )
+    restart_calls = []
     server = ThreadingHTTPServer(
         ("127.0.0.1", 0),
-        make_handler(output, controller, auth),
+        make_handler(output, controller, auth, lambda: not restart_calls.append(True)),
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -53,6 +54,7 @@ def test_local_refresh_server_requires_token_and_reports_completion(tmp_path: Pa
         health = read_json(f"{base_url}/api/health")
         assert health["ok"]
         assert health["refresh_available"]
+        assert health["restart_available"]
         assert health["auth_available"]
         assert health["status"]["reports"]["latest"]["as_of"] == "2026-08-24"
         assert health["status"]["reports"]["latest"]["version"]
@@ -104,6 +106,17 @@ def test_local_refresh_server_requires_token_and_reports_completion(tmp_path: Pa
             time.sleep(0.02)
         assert status["phase"] == "success"
         assert status["return_code"] == 0
+
+        restart_request = Request(
+            f"{base_url}/api/restart",
+            method="POST",
+            headers={"X-Refresh-Token": health["refresh_token"]},
+        )
+        with urlopen(restart_request, timeout=3) as response:
+            restart_result = json.loads(response.read().decode("utf-8"))
+        assert response.status == 202
+        assert restart_result["ok"]
+        assert restart_calls == [True]
     finally:
         server.shutdown()
         server.server_close()

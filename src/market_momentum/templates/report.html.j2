@@ -137,7 +137,7 @@
     <section class="panel header-panel">
       <div class="head-line">
         <div><h1>全市场趋势与动量筛选 <span class="tag">REAL DATA · 同花顺金融 API</span></h1></div>
-        <nav class="nav"><a href="latest.html">全市场趋势</a><a href="industry.html">行业强度</a><button id="api-key-button" class="api-key-button" type="button">设置 API Key</button><button id="refresh-report" class="refresh-button" type="button">一键刷新</button><span id="refresh-status" class="refresh-status"></span></nav>
+        <nav class="nav"><a href="latest.html">全市场趋势</a><a href="industry.html">行业强度</a><button id="api-key-button" class="api-key-button" type="button">设置 API Key</button><button id="refresh-report" class="refresh-button" type="button">一键刷新</button><button id="restart-service" type="button">重启服务</button><span id="refresh-status" class="refresh-status"></span></nav>
       </div>
       <div class="meta">数据时间：<b id="as-of"></b> ｜ 数据源：<b id="data-source"></b> ｜ 价格口径：<b id="price-basis"></b></div>
       <div class="meta">口径：趋势与动量指标按未取整值计算；页面筛选会联动全部图表、排名与明细。</div>
@@ -248,6 +248,7 @@
   <script>
     const DATA = JSON.parse(document.getElementById("report-data").textContent);
     const refreshButton = document.getElementById("refresh-report");
+    const restartButton = document.getElementById("restart-service");
     const refreshStatus = document.getElementById("refresh-status");
     const apiKeyButton = document.getElementById("api-key-button");
     const apiKeyDialog = document.getElementById("api-key-dialog");
@@ -307,6 +308,7 @@
     function showRefreshStatus(status) {
       const phase = status?.phase || "idle";
       refreshButton.disabled = phase === "running";
+      restartButton.disabled = phase === "running";
       refreshButton.classList.toggle("running", phase === "running");
       refreshButton.textContent = phase === "running" ? "刷新中…" : "一键刷新";
       refreshStatus.textContent = phase === "running" ? "同步行情与行业数据，可能需要数分钟" : phase === "error" ? status.message : phase === "success" ? "上次刷新完成" : "";
@@ -360,6 +362,39 @@
       }
     }
 
+    async function restartLocalService() {
+      if (!refreshToken) return;
+      const previousToken = refreshToken;
+      clearTimeout(refreshPollTimer);
+      refreshButton.disabled = true;
+      restartButton.disabled = true;
+      restartButton.textContent = "重启中…";
+      refreshStatus.textContent = "正在重启本地服务";
+      try {
+        const response = await fetch("/api/restart", {method:"POST", headers:{"X-Refresh-Token":previousToken}});
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "restart_failed");
+        await new Promise(resolve => setTimeout(resolve, 600));
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          try {
+            const healthResponse = await fetch("/api/health", {cache:"no-store"});
+            const health = await healthResponse.json();
+            if (health.ok && health.refresh_token && health.refresh_token !== previousToken) {
+              window.location.reload();
+              return;
+            }
+          } catch (error) {}
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        throw new Error("restart_timeout");
+      } catch (error) {
+        restartButton.disabled = false;
+        refreshButton.disabled = false;
+        restartButton.textContent = "重试重启";
+        refreshStatus.textContent = "重启失败，请从终端启动服务";
+      }
+    }
+
     async function initializeRefreshButton() {
       try {
         const response = await fetch("/api/health", {cache:"no-store"});
@@ -369,9 +404,12 @@
         if (loadLatestReport(result.status)) return;
         refreshPollTimer = setTimeout(pollRefreshStatus, result.status.phase === "running" ? 1000 : 5000);
         refreshButton.addEventListener("click", startReportRefresh);
+        restartButton.addEventListener("click", restartLocalService);
       } catch (error) {
         refreshButton.disabled = true;
+        restartButton.disabled = true;
         refreshButton.title = "请使用 market-momentum serve 启动本地报告服务";
+        restartButton.title = "服务已停止时，浏览器无法直接启动本机进程";
         refreshStatus.textContent = "静态模式不可刷新";
       }
     }

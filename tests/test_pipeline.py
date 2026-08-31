@@ -37,6 +37,8 @@ def test_end_to_end_report_is_self_contained(tmp_path: Path):
     assert database.exists()
     assert "全市场趋势与动量筛选" in html
     assert "一键刷新" in html
+    assert "重启服务" in html
+    assert "/api/restart" in html
     assert "/api/health" in html
     assert "/api/auth/login" in html
     assert 'const REPORT_KEY = "latest"' in html
@@ -304,6 +306,8 @@ def test_build_industry_report_from_official_cli_envelopes(tmp_path: Path):
     assert "行业一股票" in html
     assert "000300.SH 沪深300" in html
     assert "一键刷新" in html
+    assert "重启服务" in html
+    assert "/api/restart" in html
     assert "/api/refresh" in html
     assert "/api/auth/login" in html
     assert "设置 API Key" in html

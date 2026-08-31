@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import secrets
 import shutil
 import subprocess
+import sys
 import threading
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 
@@ -234,6 +236,7 @@ def make_handler(
     output_dir: Path,
     controller: RefreshController,
     auth_controller: Optional[AuthController] = None,
+    restart_callback: Optional[Callable[[], bool]] = None,
 ):
     auth = auth_controller or AuthController()
 
@@ -264,6 +267,8 @@ def make_handler(
                     {
                         "ok": True,
                         "refresh_available": True,
+                        "restart_available": restart_callback is not None,
+                        "managed_service": os.environ.get("MARKET_MOMENTUM_MANAGED") == "launchd",
                         "auth_available": auth.available(),
                         "refresh_token": controller.token,
                         "status": controller.snapshot(),
@@ -283,7 +288,7 @@ def make_handler(
             super().do_GET()
 
         def do_POST(self) -> None:
-            if self.path not in {"/api/refresh", "/api/auth/login"}:
+            if self.path not in {"/api/refresh", "/api/auth/login", "/api/restart"}:
                 self._send_json(404, {"ok": False, "error": "not_found"})
                 return
             if not self._is_loopback():
@@ -302,6 +307,20 @@ def make_handler(
                 self._send_json(413, {"ok": False, "error": "request_too_large"})
                 return
             body = self.rfile.read(content_length) if content_length else b""
+            if self.path == "/api/restart":
+                if controller.snapshot().get("phase") == "running":
+                    self._send_json(409, {"ok": False, "error": "refresh_running"})
+                    return
+                accepted = restart_callback is not None and restart_callback()
+                self._send_json(
+                    202 if accepted else 409,
+                    {
+                        "ok": accepted,
+                        "message": "service_restarting" if accepted else None,
+                        "error": None if accepted else "restart_pending",
+                    },
+                )
+                return
             if self.path == "/api/auth/login":
                 if "application/json" not in self.headers.get("Content-Type", ""):
                     self._send_json(415, {"ok": False, "error": "json_required"})
@@ -353,10 +372,28 @@ def serve_reports(project_dir: Path, host: str = "127.0.0.1", port: int = 8765) 
     output_dir.mkdir(parents=True, exist_ok=True)
     controller = RefreshController(project_dir)
     auth_controller = AuthController()
+    restart_requested = threading.Event()
+    server_holder: Dict[str, ThreadingHTTPServer] = {}
+
+    def request_restart() -> bool:
+        if restart_requested.is_set():
+            return False
+        restart_requested.set()
+        server = server_holder.get("server")
+        if server is None:
+            return False
+        threading.Thread(
+            target=server.shutdown,
+            name="market-report-restart",
+            daemon=True,
+        ).start()
+        return True
+
     server = ThreadingHTTPServer(
         (host, port),
-        make_handler(output_dir, controller, auth_controller),
+        make_handler(output_dir, controller, auth_controller, request_restart),
     )
+    server_holder["server"] = server
     actual_port = server.server_address[1]
     print(f"本地报告服务: http://{host}:{actual_port}/latest.html")
     print("页面可安全保存 API Key，并使用系统凭据一键刷新；按 Ctrl+C 停止服务。")
@@ -366,3 +403,20 @@ def serve_reports(project_dir: Path, host: str = "127.0.0.1", port: int = 8765) 
         pass
     finally:
         server.server_close()
+    if restart_requested.is_set():
+        print("正在重启本地报告服务…", flush=True)
+        os.execv(
+            sys.executable,
+            [
+                sys.executable,
+                "-m",
+                "market_momentum.cli",
+                "serve",
+                "--project-dir",
+                str(project_dir),
+                "--host",
+                host,
+                "--port",
+                str(actual_port),
+            ],
+        )
