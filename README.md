@@ -2,7 +2,7 @@
 
 全市场趋势、动量、流动性与行业强度筛选项目。仓库支持确定性模拟数据和同花顺金融 API 真实数据两条路径；真实路径使用官方 `hithink-finance` CLI、Market Dump、本地 DuckDB、证券目录与 90 个一级行业指数数据，输出可完全离线打开的交互式 HTML。
 
-详细设计和已确定的计算口径见 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)。
+详细设计和已确定的计算口径见 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)，每次功能迭代与重要修复见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 本地快速开始
 
